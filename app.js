@@ -12,6 +12,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const canvasCtx = canvasElement.getContext('2d');
   const sourceSelect = document.getElementById('input-source-select');
   const videoFileInput = document.getElementById('video-file-input');
+
+  // Elementos do DOM - Banner de Erro & Status de Câmera
+  const cameraErrorBanner = document.getElementById('camera-error-banner');
+  const cameraErrorTitle = document.getElementById('camera-error-title');
+  const cameraErrorMsg = document.getElementById('camera-error-msg');
+  const btnRetryCamera = document.getElementById('btn-retry-camera');
+  const statusText = document.getElementById('status-text');
+  const statusDot = document.querySelector('#system-status .pulse-dot');
   
   // Elementos do DOM - Controles
   const btnStart = document.getElementById('btn-start-stream');
@@ -61,9 +69,13 @@ document.addEventListener('DOMContentLoaded', () => {
   let currentJSONProtocol = "";
   let sessionLogs = [];
 
+  // Estado do Motor MediaPipe Pose & Conexão de Mídia
+  let poseEngine = null;
+  let mediaStream = null;
+  let isSendingFrame = false;
+
   // Variáveis da Simulação Sintética
   let simTime = 0;
-  let simValgusPhase = false;
 
   // Web Speech API (Sintetizador de Voz em Português)
   const synth = window.speechSynthesis;
@@ -95,19 +107,194 @@ document.addEventListener('DOMContentLoaded', () => {
   window.addEventListener('resize', resizeCanvas);
   resizeCanvas();
 
+  // Utilitários de Interface (Status & Erros)
+  function showCameraError(msg) {
+    if (cameraErrorBanner) {
+      cameraErrorMsg.textContent = msg;
+      cameraErrorBanner.classList.remove('hidden');
+    }
+  }
+
+  function hideCameraError() {
+    if (cameraErrorBanner) {
+      cameraErrorBanner.classList.add('hidden');
+    }
+  }
+
+  function updateStatusText(text, dotColor = "green") {
+    if (statusText) statusText.textContent = text;
+    if (statusDot) {
+      statusDot.className = `pulse-dot ${dotColor}`;
+    }
+  }
+
+  /**
+   * INICIALIZAÇÃO DO MEDIAPIPE POSE (Visão Computacional)
+   */
+  function initPoseEngine() {
+    if (poseEngine) return true;
+    if (typeof window.Pose === 'undefined') {
+      console.error("SDK do MediaPipe Pose não encontrado no window.");
+      return false;
+    }
+
+    try {
+      poseEngine = new window.Pose({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+      });
+
+      poseEngine.setOptions({
+        modelComplexity: 1,
+        smoothLandmarks: true,
+        enableSegmentation: false,
+        smoothSegmentation: false,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5
+      });
+
+      poseEngine.onResults(onPoseResults);
+      return true;
+    } catch (err) {
+      console.error("Erro ao inicializar MediaPipe Pose:", err);
+      return false;
+    }
+  }
+
+  /**
+   * CALLBACK DE RESULTADOS DO MEDIAPIPE POSE
+   */
+  function onPoseResults(results) {
+    if (!isRunning) return;
+    resizeCanvas();
+
+    const width = canvasElement.width;
+    const height = canvasElement.height;
+    const sourceMode = sourceSelect.value;
+    const useFilter = chkNoiseFilter.checked;
+
+    // 1. Limpar canvas
+    canvasCtx.clearRect(0, 0, width, height);
+
+    // 2. Renderizar frame de vídeo do paciente no canvas se estiver em modo webcam/video
+    if ((sourceMode === 'webcam' || sourceMode === 'video') && results.image) {
+      canvasCtx.save();
+      if (sourceMode === 'webcam') {
+        // Modo espelho natural para webcam frontal
+        canvasCtx.translate(width, 0);
+        canvasCtx.scale(-1, 1);
+      }
+      canvasCtx.drawImage(results.image, 0, 0, width, height);
+      canvasCtx.restore();
+    }
+
+    // 3. Processar keypoints articulares
+    if (results.poseLandmarks && results.poseLandmarks.length >= 33) {
+      const processedData = analyzer.processFrame(results.poseLandmarks, useFilter);
+      renderBiomechanicalOverlay(processedData.landmarksProcessed, processedData, sourceMode === 'webcam');
+      updatePatientUI(processedData);
+    } else if (sourceMode === 'webcam' || sourceMode === 'video') {
+      // Nenhum corpo visível detectado no frame
+      hudPhaseText.textContent = "POSICIONE-SE EM FRENTE À CÂMERA";
+      hudKneeAngle.textContent = "--°";
+      jsonStreamOutput.textContent = analyzer.formatJSONProtocol(null, sourceMode === 'webcam' ? "Câmera Mobile 1 - Vista Frontal ao Vivo" : "Câmera Mobile 1 - Arquivo de Vídeo");
+    }
+  }
+
+  /**
+   * GERENCIADOR DE STREAM DE MÍDIA (WEBCAM & VÍDEO)
+   */
+  function stopMediaStream() {
+    if (mediaStream) {
+      mediaStream.getTracks().forEach(track => track.stop());
+      mediaStream = null;
+    }
+    if (videoElement) {
+      videoElement.pause();
+      videoElement.srcObject = null;
+      videoElement.removeAttribute('src');
+    }
+  }
+
+  async function startWebcamStream() {
+    stopMediaStream();
+    hideCameraError();
+    updateStatusText("Conectando Câmera...", "yellow");
+
+    if (!initPoseEngine()) {
+      showCameraError("Não foi possível carregar a biblioteca MediaPipe Pose. Verifique sua conexão com a internet.");
+      updateStatusText("Erro no Motor AI", "red");
+      return;
+    }
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      showCameraError("Seu navegador ou modo de conexão exige endereço seguro (localhost/HTTPS) para acessar a webcam.");
+      updateStatusText("Sem Suporte de Mídia", "red");
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          facingMode: "user"
+        },
+        audio: false
+      });
+
+      mediaStream = stream;
+      videoElement.srcObject = stream;
+      await videoElement.play();
+
+      updateStatusText("Câmera Conectada (30 FPS)", "green");
+      if (!isRunning) {
+        btnStart.click();
+      }
+    } catch (err) {
+      console.error("Falha ao acessar a câmera do computador:", err);
+      let errorMsg = "Não foi possível conectar com a câmera do computador. ";
+      if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+        errorMsg += "A permissão de acesso à câmera foi negada. Clique no ícone de permissões do navegador para permitir o uso da câmera.";
+      } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
+        errorMsg += "Nenhuma câmera física foi encontrada no computador.";
+      } else if (err.name === "NotReadableError" || err.name === "TrackStartError") {
+        errorMsg += "A câmera já está em uso por outro aplicativo (Teams, Zoom, Meet, etc). Feche-o e tente novamente.";
+      } else {
+        errorMsg += (err.message || "Verifique se a câmera está conectada e liberada.");
+      }
+      showCameraError(errorMsg);
+      updateStatusText("Câmera Desconectada", "red");
+    }
+  }
+
+  function handleVideoFile(file) {
+    stopMediaStream();
+    hideCameraError();
+    if (!file) return;
+
+    if (!initPoseEngine()) {
+      showCameraError("Erro ao inicializar biblioteca de Visão Computacional.");
+      return;
+    }
+
+    const url = URL.createObjectURL(file);
+    videoElement.src = url;
+    videoElement.loop = true;
+    videoElement.play();
+    updateStatusText(`Vídeo: ${file.name}`, "green");
+    if (!isRunning) {
+      btnStart.click();
+    }
+  }
+
   /**
    * 1. GERADOR DE KEYPOINTS SINTÉTICOS (Modo Simulador)
-   * Permite testar todo o motor biomecânico sem depender de câmera física
    */
   function generateSyntheticLandmarks() {
     simTime += 0.04;
-    // Ciclo de agachamento em senoide
-    const squatDepthFactor = (Math.sin(simTime) + 1) / 2; // 0.0 (em pé) a 1.0 (agachado profundo)
-    
-    // Injeta propositalmente valgo dinâmico periodicamente para testar o alerta
+    const squatDepthFactor = (Math.sin(simTime) + 1) / 2;
     const isValgusCycle = Math.floor(simTime / (Math.PI * 2)) % 3 === 1;
 
-    const headY = 0.15;
     const shoulderY = 0.28;
     const hipY = 0.50 + squatDepthFactor * 0.18;
     const kneeY = 0.70 + squatDepthFactor * 0.08;
@@ -117,33 +304,21 @@ document.addEventListener('DOMContentLoaded', () => {
     const hipXDist = 0.10;
     let kneeXDist = 0.11;
 
-    // Se estiver na fase de valgo, os joelhos colapsam internamente
     if (isValgusCycle && squatDepthFactor > 0.4) {
-      kneeXDist = 0.04; // Colapso medial
+      kneeXDist = 0.04;
     }
 
     const ankleXDist = 0.11;
-
-    // Criar array de 33 landmarks do padrão MediaPipe Pose
     const lms = new Array(33).fill(0).map(() => ({ x: 0.5, y: 0.5, z: 0, visibility: 0.99 }));
 
-    // Ombros
     lms[11] = { x: 0.5 - shoulderXDist, y: shoulderY, z: 0, visibility: 0.99 };
     lms[12] = { x: 0.5 + shoulderXDist, y: shoulderY, z: 0, visibility: 0.99 };
-
-    // Quadris
     lms[23] = { x: 0.5 - hipXDist, y: hipY, z: 0, visibility: 0.99 };
     lms[24] = { x: 0.5 + hipXDist, y: hipY, z: 0, visibility: 0.99 };
-
-    // Joelhos
     lms[25] = { x: 0.5 - kneeXDist, y: kneeY, z: 0, visibility: 0.99 };
     lms[26] = { x: 0.5 + kneeXDist, y: kneeY, z: 0, visibility: 0.99 };
-
-    // Tornozelos
     lms[27] = { x: 0.5 - ankleXDist, y: ankleY, z: 0, visibility: 0.99 };
     lms[28] = { x: 0.5 + ankleXDist, y: ankleY, z: 0, visibility: 0.99 };
-
-    // Calcanhares / Pés
     lms[29] = { x: 0.5 - ankleXDist, y: ankleY + 0.02, z: 0, visibility: 0.99 };
     lms[30] = { x: 0.5 + ankleXDist, y: ankleY + 0.02, z: 0, visibility: 0.99 };
 
@@ -153,15 +328,17 @@ document.addEventListener('DOMContentLoaded', () => {
   /**
    * 2. RENDERIZADOR DO OVERLAY CANVASES (DESENHO BIOMECÂNICO)
    */
-  function renderBiomechanicalOverlay(landmarks, data) {
+  function renderBiomechanicalOverlay(landmarks, data, isMirrored = false) {
     const width = canvasElement.width;
     const height = canvasElement.height;
-    canvasCtx.clearRect(0, 0, width, height);
 
     if (!landmarks || landmarks.length < 33) return;
 
-    // Converte coordenada normalizada (0.0 - 1.0) para pixels no canvas
-    const toPx = (lm) => ({ x: lm.x * width, y: lm.y * height });
+    // Em modo espelhado (webcam), inverte X no canvas para combinar com a imagem espelhada
+    const toPx = (lm) => {
+      const xPx = isMirrored ? (1 - lm.x) * width : lm.x * width;
+      return { x: xPx, y: lm.y * height };
+    };
 
     const p11 = toPx(landmarks[11]); // Ombro E
     const p12 = toPx(landmarks[12]); // Ombro D
@@ -172,7 +349,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const p27 = toPx(landmarks[27]); // Tornozelo E
     const p28 = toPx(landmarks[28]); // Tornozelo D
 
-    // Definição de Cores Biomecânicas
     const isValgus = data?.falhasDetectadas?.valgoDinamico;
     const isGoodAngle = data?.angulosAtuais?.joelhoMedioDeg <= 92 && data?.angulosAtuais?.joelhoMedioDeg >= 78;
     
@@ -184,11 +360,11 @@ document.addEventListener('DOMContentLoaded', () => {
     canvasCtx.lineJoin = 'round';
     canvasCtx.lineCap = 'round';
 
-    // 1. Desenhar Conexões dos Segmentos (Ossos/Hastes Biomecânicas)
+    // Connections
     const connections = [
-      [p11, p12], [p11, p23], [p12, p24], [p23, p24], // Tronco & Bacia
-      [p23, p25], [p25, p27],                         // Perna Esquerda
-      [p24, p26], [p26, p28]                          // Perna Direita
+      [p11, p12], [p11, p23], [p12, p24], [p23, p24],
+      [p23, p25], [p25, p27],
+      [p24, p26], [p26, p28]
     ];
 
     connections.forEach(([from, to]) => {
@@ -200,9 +376,9 @@ document.addEventListener('DOMContentLoaded', () => {
       canvasCtx.shadowBlur = 10;
       canvasCtx.stroke();
     });
-    canvasCtx.shadowBlur = 0; // Reset shadow
+    canvasCtx.shadowBlur = 0;
 
-    // 2. Desenhar Nós Articulares (Joint Nodes)
+    // Joint Nodes
     [p11, p12, p23, p24, p25, p26, p27, p28].forEach(pt => {
       canvasCtx.beginPath();
       canvasCtx.arc(pt.x, pt.y, 7, 0, 2 * Math.PI);
@@ -213,13 +389,13 @@ document.addEventListener('DOMContentLoaded', () => {
       canvasCtx.stroke();
     });
 
-    // 3. Desenhar Arcos Angulares dos Joelhos
+    // Angles
     if (data && data.angulosAtuais) {
-      drawAngleArc(canvasCtx, p25, p23, p27, `${Math.round(data.angulosAtuais.joelhoEsquerdoDeg)}°`, jointColor);
-      drawAngleArc(canvasCtx, p26, p24, p28, `${Math.round(data.angulosAtuais.joelhoDireitoDeg)}°`, jointColor);
+      drawAngleArc(canvasCtx, p25, `${Math.round(data.angulosAtuais.joelhoEsquerdoDeg)}°`, jointColor);
+      drawAngleArc(canvasCtx, p26, `${Math.round(data.angulosAtuais.joelhoDireitoDeg)}°`, jointColor);
     }
 
-    // 4. Desenhar Linha Guiador de Valgo (Vetor Vermelho se Houver Colapso Medial)
+    // Valgus line warning
     if (isValgus) {
       canvasCtx.beginPath();
       canvasCtx.setLineDash([6, 6]);
@@ -227,11 +403,11 @@ document.addEventListener('DOMContentLoaded', () => {
       canvasCtx.lineTo(p26.x, p26.y);
       canvasCtx.strokeStyle = "#ef4444";
       canvasCtx.stroke();
-      canvasCtx.setLineDash([]); // Reset line dash
+      canvasCtx.setLineDash([]);
     }
   }
 
-  function drawAngleArc(ctx, vertex, pA, pB, labelText, color) {
+  function drawAngleArc(ctx, vertex, labelText, color) {
     ctx.save();
     ctx.beginPath();
     ctx.arc(vertex.x, vertex.y, 24, 0, Math.PI * 2);
@@ -246,12 +422,11 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /**
-   * 3. ATUALIZAÇÃO DA INTERFACE DO PACIENTE (FRONTEND DO PACIENTE)
+   * 3. ATUALIZAÇÃO DA INTERFACE DO PACIENTE
    */
   function updatePatientUI(data) {
     if (!data || !data.angulosAtuais) return;
 
-    // 1. Atualizar Overlay HUD Canvas
     const faseMap = {
       "standing": "EM PÉ (NEUTRO)",
       "eccentric": "AGACHANDO (EXCÊNTRICA)",
@@ -261,7 +436,6 @@ document.addEventListener('DOMContentLoaded', () => {
     hudPhaseText.textContent = faseMap[data.faseMovimento] || data.faseMovimento.toUpperCase();
     hudKneeAngle.textContent = `${data.angulosAtuais.joelhoMedioDeg.toFixed(0)}°`;
 
-    // 2. Banner de Feedback do Paciente
     const status = data.qualidadeExecucao.status;
     const msg = data.qualidadeExecucao.mensagemFeedback;
 
@@ -269,7 +443,6 @@ document.addEventListener('DOMContentLoaded', () => {
     feedbackTag.textContent = status === 'EXCELENTE' ? 'EXCELENTE POSTURA' : (status === 'ATENÇÃO' ? 'ATENÇÃO À POSTURA' : 'CORREÇÃO NECESSÁRIA');
     feedbackMainMsg.textContent = msg;
 
-    // Alerta de Voz para o Paciente
     if (status !== 'EXCELENTE') {
       speakFeedback(msg);
       canvasWarningToast.classList.remove('hidden');
@@ -278,9 +451,7 @@ document.addEventListener('DOMContentLoaded', () => {
       canvasWarningToast.classList.add('hidden');
     }
 
-    // 3. Atualizar Medidores Angulares
     valKneeAngle.textContent = `${data.angulosAtuais.joelhoMedioDeg.toFixed(1)}°`;
-    // Mapeia flexão (180° = 0%, 80° = 100%)
     const kneePct = Math.min(100, Math.max(0, ((180 - data.angulosAtuais.joelhoMedioDeg) / 100) * 100));
     barKneeFlexion.style.width = `${kneePct}%`;
 
@@ -288,7 +459,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const trunkPct = Math.min(100, (data.angulosAtuais.troncoInclinacaoDeg / 45) * 100);
     barTrunkAngle.style.width = `${trunkPct}%`;
 
-    // 4. Medidores de Falhas
     if (data.falhasDetectadas.valgoDinamico) {
       valValgusStatus.textContent = "VALGO DETECTADO!";
       valValgusStatus.className = "metric-value status-alert";
@@ -309,22 +479,19 @@ document.addEventListener('DOMContentLoaded', () => {
       indicatorHeel.className = "status-indicator-bar";
     }
 
-    // 5. Placar de Repetições
     repTotal.textContent = data.repeticoes.completas;
     repCorrect.textContent = data.repeticoes.corretas;
     repFaults.textContent = data.repeticoes.comCompensacao;
 
-    // 6. Stream de Saída em Formato JSON (Protocolo de Resposta do Sistema)
     const cameraLabelMap = {
       "simulated": "Câmera Mobile 1 - Agrupador Sintético Frontal",
-      "webcam": "Câmera Mobile 1 - Vista Frontal ao Vivo",
+      "webcam": "Câmera Mobile 1 - Vista Frontal ao Vivo (Webcam)",
       "video": "Câmera Mobile 1 - Arquivo de Vídeo Processado"
     };
     const activeCam = cameraLabelMap[sourceSelect.value] || "Câmera Mobile 1 - Vista Frontal";
     currentJSONProtocol = analyzer.formatJSONProtocol(data, activeCam);
     jsonStreamOutput.textContent = currentJSONProtocol;
 
-    // Guardar no histórico da sessão
     sessionLogs.push(JSON.parse(currentJSONProtocol));
     if (sessionLogs.length > 500) sessionLogs.shift();
   }
@@ -332,7 +499,7 @@ document.addEventListener('DOMContentLoaded', () => {
   /**
    * 4. LOOP PRINCIPAL DE PROCESSAMENTO EM TEMPO REAL
    */
-  function mainLoop() {
+  async function mainLoop() {
     if (!isRunning) return;
 
     resizeCanvas();
@@ -340,10 +507,24 @@ document.addEventListener('DOMContentLoaded', () => {
     const sourceMode = sourceSelect.value;
 
     if (sourceMode === 'simulated') {
+      hideCameraError();
       const rawLandmarks = generateSyntheticLandmarks();
       const processedData = analyzer.processFrame(rawLandmarks, useFilter);
-      renderBiomechanicalOverlay(processedData.landmarksProcessed, processedData);
+      renderBiomechanicalOverlay(processedData.landmarksProcessed, processedData, false);
       updatePatientUI(processedData);
+    } else if (sourceMode === 'webcam' || sourceMode === 'video') {
+      if (videoElement && videoElement.readyState >= 2 && !videoElement.paused && !videoElement.ended) {
+        if (poseEngine && !isSendingFrame) {
+          isSendingFrame = true;
+          try {
+            await poseEngine.send({ image: videoElement });
+          } catch (err) {
+            console.error("Erro no envio do frame para o MediaPipe:", err);
+          } finally {
+            isSendingFrame = false;
+          }
+        }
+      }
     }
 
     animationFrameId = requestAnimationFrame(mainLoop);
@@ -351,10 +532,45 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 5. EVENT LISTENERS E CONTROLES
 
-  btnStart.addEventListener('click', () => {
+  sourceSelect.addEventListener('change', async (e) => {
+    const val = e.target.value;
+    if (val === 'simulated') {
+      stopMediaStream();
+      hideCameraError();
+      updateStatusText("Motor Conectado (30 FPS)", "green");
+    } else if (val === 'webcam') {
+      await startWebcamStream();
+    } else if (val === 'video') {
+      stopMediaStream();
+      videoFileInput.click();
+    }
+  });
+
+  videoFileInput.addEventListener('change', (e) => {
+    if (e.target.files && e.target.files[0]) {
+      handleVideoFile(e.target.files[0]);
+    }
+  });
+
+  if (btnRetryCamera) {
+    btnRetryCamera.addEventListener('click', async () => {
+      if (sourceSelect.value === 'webcam') {
+        await startWebcamStream();
+      }
+    });
+  }
+
+  btnStart.addEventListener('click', async () => {
     isRunning = true;
     btnStart.disabled = true;
     btnPause.disabled = false;
+
+    if (sourceSelect.value === 'webcam' && !mediaStream) {
+      await startWebcamStream();
+    } else if (sourceSelect.value === 'video' && videoElement.paused) {
+      videoElement.play();
+    }
+
     mainLoop();
   });
 
@@ -362,6 +578,9 @@ document.addEventListener('DOMContentLoaded', () => {
     isRunning = false;
     btnStart.disabled = false;
     btnPause.disabled = true;
+    if (videoElement && !videoElement.paused) {
+      videoElement.pause();
+    }
     if (animationFrameId) cancelAnimationFrame(animationFrameId);
   });
 
@@ -400,13 +619,6 @@ document.addEventListener('DOMContentLoaded', () => {
     document.body.appendChild(downloadAnchor);
     downloadAnchor.click();
     downloadAnchor.remove();
-  });
-
-  // Seletor de Câmera/Fonte
-  sourceSelect.addEventListener('change', (e) => {
-    if (e.target.value === 'video') {
-      videoFileInput.click();
-    }
   });
 
   // Iniciar por padrão no modo Simulador para demonstração imediata

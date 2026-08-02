@@ -72,7 +72,7 @@
 
         <!-- Video & HUD Overlay Canvas Viewport -->
         <div class="canvas-wrapper" id="canvas-wrapper">
-          <video id="input-video" playsinline muted></video>
+          <video id="input-video" playsinline muted style="display: none;"></video>
           <canvas id="output-canvas"></canvas>
           
           <!-- Floating Status Overlay -->
@@ -91,6 +91,18 @@
           <div class="canvas-warning-toast hidden" id="canvas-warning-toast">
             <i data-lucide="alert-triangle"></i>
             <span id="canvas-warning-msg">Valgo Dinâmico Detectado!</span>
+          </div>
+
+          <!-- Camera Error / Permission Banner -->
+          <div id="camera-error-banner" class="camera-error-banner hidden">
+            <i data-lucide="camera-off"></i>
+            <div class="camera-error-content">
+              <strong id="camera-error-title">Câmera Não Conectada</strong>
+              <p id="camera-error-msg">Não foi possível acessar a câmera do computador. Verifique as permissões do seu navegador.</p>
+            </div>
+            <button id="btn-retry-camera" class="btn btn-sm btn-primary">
+              <i data-lucide="refresh-cw"></i> Tentar Novamente
+            </button>
           </div>
         </div>
 
