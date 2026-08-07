@@ -1,21 +1,22 @@
 /**
- * BioPhysio AI - Interface de Captação e Interação (App Controller)
+ * BioPhysio AI - Interface de Captação e Interação (App Controller - Fase 2)
  */
 
 document.addEventListener('DOMContentLoaded', () => {
-  // Inicialização do Motor Biomecânico
-  const analyzer = new TherapeuticSquatAnalyzer();
+  // Inicialização do Motor Biomecânico Unificado
+  const analyzer = new TherapeuticExerciseAnalyzer("squat");
   
   // Elementos do DOM - Captação & Canvas
   const videoElement = document.getElementById('input-video');
   const canvasElement = document.getElementById('output-canvas');
   const canvasCtx = canvasElement.getContext('2d');
   const sourceSelect = document.getElementById('input-source-select');
+  const exerciseSelect = document.getElementById('exercise-select');
   const videoFileInput = document.getElementById('video-file-input');
 
-  // Elementos do DOM - Banner de Erro & Status de Câmera
+  // Elementos do DOM - IoT & Câmera
+  const btnConnectArduino = document.getElementById('btn-connect-arduino');
   const cameraErrorBanner = document.getElementById('camera-error-banner');
-  const cameraErrorTitle = document.getElementById('camera-error-title');
   const cameraErrorMsg = document.getElementById('camera-error-msg');
   const btnRetryCamera = document.getElementById('btn-retry-camera');
   const statusText = document.getElementById('status-text');
@@ -28,14 +29,19 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnToggleVoice = document.getElementById('btn-toggle-voice');
   const chkNoiseFilter = document.getElementById('chk-noise-filter');
   
-  // Elementos do DOM - HUD & Dashboard Paciente
+  // Elementos do DOM - HUD, Distância e Rastreamento de Paciente
   const hudPhaseText = document.getElementById('hud-phase-text');
   const hudKneeAngle = document.getElementById('hud-knee-angle');
+  const hudAngleSub = document.getElementById('hud-angle-sub');
+  const canvasDistanceToast = document.getElementById('canvas-distance-toast');
+  const canvasDistanceMsg = document.getElementById('canvas-distance-msg');
+  const canvasLockBadge = document.getElementById('canvas-lock-badge');
+  const btnUnlockSubject = document.getElementById('btn-unlock-subject');
+
   const canvasWarningToast = document.getElementById('canvas-warning-toast');
   const canvasWarningMsg = document.getElementById('canvas-warning-msg');
 
   const patientFeedbackCard = document.getElementById('patient-feedback-card');
-  const feedbackIconContainer = document.getElementById('feedback-icon-container');
   const feedbackTag = document.getElementById('feedback-tag');
   const feedbackMainMsg = document.getElementById('feedback-main-msg');
 
@@ -45,11 +51,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const barTrunkAngle = document.getElementById('bar-trunk-angle');
 
   const valValgusStatus = document.getElementById('val-valgus-status');
-  const valValgusRatio = document.getElementById('val-valgus-ratio');
   const indicatorValgus = document.getElementById('indicator-valgus');
 
   const valHeelStatus = document.getElementById('val-heel-status');
-  const valHeelElev = document.getElementById('val-heel-elev');
   const indicatorHeel = document.getElementById('indicator-heel');
 
   const repTotal = document.getElementById('rep-total');
@@ -73,20 +77,17 @@ document.addEventListener('DOMContentLoaded', () => {
   let poseEngine = null;
   let mediaStream = null;
   let isSendingFrame = false;
-
-  // Variáveis da Simulação Sintética
   let simTime = 0;
 
-  // Web Speech API (Sintetizador de Voz em Português)
   const synth = window.speechSynthesis;
 
   function speakFeedback(msg) {
     if (!voiceEnabled || !synth) return;
     const now = Date.now();
-    if (msg === lastSpokenMessage && now - lastSpeechTime < 5000) return; // Evita repetição excessiva
+    if (msg === lastSpokenMessage && now - lastSpeechTime < 5000) return;
     if (now - lastSpeechTime < 3000) return;
 
-    synth.cancel(); // Cancela falas anteriores pendentes
+    synth.cancel();
     const utterance = new SpeechSynthesisUtterance(msg);
     utterance.lang = 'pt-BR';
     utterance.rate = 1.05;
@@ -96,7 +97,6 @@ document.addEventListener('DOMContentLoaded', () => {
     lastSpeechTime = now;
   }
 
-  // Ajusta resolução do Canvas para corresponder ao container
   function resizeCanvas() {
     const wrapper = document.getElementById('canvas-wrapper');
     if (wrapper) {
@@ -107,7 +107,6 @@ document.addEventListener('DOMContentLoaded', () => {
   window.addEventListener('resize', resizeCanvas);
   resizeCanvas();
 
-  // Utilitários de Interface (Status & Erros)
   function showCameraError(msg) {
     if (cameraErrorBanner) {
       cameraErrorMsg.textContent = msg;
@@ -128,9 +127,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  /**
-   * INICIALIZAÇÃO DO MEDIAPIPE POSE (Visão Computacional)
-   */
   function initPoseEngine() {
     if (poseEngine) return true;
     if (typeof window.Pose === 'undefined') {
@@ -148,8 +144,8 @@ document.addEventListener('DOMContentLoaded', () => {
         smoothLandmarks: true,
         enableSegmentation: false,
         smoothSegmentation: false,
-        minDetectionConfidence: 0.5,
-        minTrackingConfidence: 0.5
+        minDetectionConfidence: 0.65,
+        minTrackingConfidence: 0.65
       });
 
       poseEngine.onResults(onPoseResults);
@@ -160,9 +156,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  /**
-   * CALLBACK DE RESULTADOS DO MEDIAPIPE POSE
-   */
   function onPoseResults(results) {
     if (!isRunning) return;
     resizeCanvas();
@@ -172,14 +165,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const sourceMode = sourceSelect.value;
     const useFilter = chkNoiseFilter.checked;
 
-    // 1. Limpar canvas
     canvasCtx.clearRect(0, 0, width, height);
 
-    // 2. Renderizar frame de vídeo do paciente no canvas se estiver em modo webcam/video
     if ((sourceMode === 'webcam' || sourceMode === 'video') && results.image) {
       canvasCtx.save();
       if (sourceMode === 'webcam') {
-        // Modo espelho natural para webcam frontal
         canvasCtx.translate(width, 0);
         canvasCtx.scale(-1, 1);
       }
@@ -187,22 +177,22 @@ document.addEventListener('DOMContentLoaded', () => {
       canvasCtx.restore();
     }
 
-    // 3. Processar keypoints articulares
     if (results.poseLandmarks && results.poseLandmarks.length >= 33) {
       const processedData = analyzer.processFrame(results.poseLandmarks, useFilter);
       renderBiomechanicalOverlay(processedData.landmarksProcessed, processedData, sourceMode === 'webcam');
       updatePatientUI(processedData);
     } else if (sourceMode === 'webcam' || sourceMode === 'video') {
-      // Nenhum corpo visível detectado no frame
       hudPhaseText.textContent = "POSICIONE-SE EM FRENTE À CÂMERA";
       hudKneeAngle.textContent = "--°";
-      jsonStreamOutput.textContent = analyzer.formatJSONProtocol(null, sourceMode === 'webcam' ? "Câmera Mobile 1 - Vista Frontal ao Vivo" : "Câmera Mobile 1 - Arquivo de Vídeo");
+      jsonStreamOutput.textContent = analyzer.formatJSONProtocol(null, sourceMode === 'webcam' ? "Câmera BioPhysio IoT - Vista Frontal ao Vivo" : "Câmera BioPhysio IoT - Arquivo de Vídeo");
     }
   }
 
-  /**
-   * GERENCIADOR DE STREAM DE MÍDIA (WEBCAM & VÍDEO)
-   */
+  // Elementos do DOM - Câmeras Físicas
+  const cameraDeviceSelect = document.getElementById('camera-device-select');
+  const btnScanCameras = document.getElementById('btn-scan-cameras');
+  const btnScanCamerasError = document.getElementById('btn-scan-cameras-error');
+
   function stopMediaStream() {
     if (mediaStream) {
       mediaStream.getTracks().forEach(track => track.stop());
@@ -215,30 +205,81 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  async function startWebcamStream() {
+  /**
+   * DETECÇÃO E LISTAGEM DE CÂMERAS PRESENTES NO DISPOSITIVO
+   */
+  async function detectAvailableCameras() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+      alert("Seu navegador não suporta detecção de dispositivos de mídia.");
+      return [];
+    }
+
+    try {
+      updateStatusText("Buscando Câmeras...", "yellow");
+      
+      // Solicita permissão temporária para revelar os nomes/labels das câmeras caso estejam vazias
+      try {
+        const tempStream = await navigator.mediaDevices.getUserMedia({ video: true });
+        tempStream.getTracks().forEach(t => t.stop());
+      } catch (e) {
+        console.warn("Permissão de câmera não concedida previamente:", e);
+      }
+
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const videoDevices = devices.filter(device => device.kind === 'videoinput');
+
+      if (cameraDeviceSelect) {
+        cameraDeviceSelect.innerHTML = '';
+
+        if (videoDevices.length === 0) {
+          const opt = document.createElement('option');
+          opt.value = "";
+          opt.textContent = "❌ Nenhuma Câmera Encontrada";
+          cameraDeviceSelect.appendChild(opt);
+          cameraDeviceSelect.classList.remove('hidden');
+          showCameraError("Nenhuma câmera física ou virtual foi localizada no seu computador.");
+          updateStatusText("Nenhuma Câmera", "red");
+        } else {
+          videoDevices.forEach((device, index) => {
+            const opt = document.createElement('option');
+            opt.value = device.deviceId;
+            opt.textContent = `📷 ${device.label || `Câmera ${index + 1}`}`;
+            cameraDeviceSelect.appendChild(opt);
+          });
+
+          cameraDeviceSelect.classList.remove('hidden');
+          updateStatusText(`${videoDevices.length} Câmera(s) Localizada(s)`, "green");
+        }
+      }
+
+      return videoDevices;
+    } catch (err) {
+      console.error("Erro ao enumerar câmeras do dispositivo:", err);
+      showCameraError(`Erro na busca de câmeras: ${err.message}`);
+      return [];
+    }
+  }
+
+  async function startWebcamStream(targetDeviceId = null) {
     stopMediaStream();
     hideCameraError();
     updateStatusText("Conectando Câmera...", "yellow");
 
     if (!initPoseEngine()) {
-      showCameraError("Não foi possível carregar a biblioteca MediaPipe Pose. Verifique sua conexão com a internet.");
+      showCameraError("Não foi possível carregar a biblioteca MediaPipe Pose.");
       updateStatusText("Erro no Motor AI", "red");
       return;
     }
 
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      showCameraError("Seu navegador ou modo de conexão exige endereço seguro (localhost/HTTPS) para acessar a webcam.");
-      updateStatusText("Sem Suporte de Mídia", "red");
-      return;
-    }
-
     try {
+      const selectedDeviceId = targetDeviceId || (cameraDeviceSelect ? cameraDeviceSelect.value : null);
+      
+      const videoConstraints = selectedDeviceId && selectedDeviceId !== ""
+        ? { deviceId: { exact: selectedDeviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }
+        : { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } };
+
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          facingMode: "user"
-        },
+        video: videoConstraints,
         audio: false
       });
 
@@ -246,23 +287,16 @@ document.addEventListener('DOMContentLoaded', () => {
       videoElement.srcObject = stream;
       await videoElement.play();
 
+      // Atualiza lista de câmeras caso ainda não populada
+      if (cameraDeviceSelect && cameraDeviceSelect.children.length <= 1) {
+        detectAvailableCameras();
+      }
+
       updateStatusText("Câmera Conectada (30 FPS)", "green");
-      if (!isRunning) {
-        btnStart.click();
-      }
+      if (!isRunning) btnStart.click();
     } catch (err) {
-      console.error("Falha ao acessar a câmera do computador:", err);
-      let errorMsg = "Não foi possível conectar com a câmera do computador. ";
-      if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
-        errorMsg += "A permissão de acesso à câmera foi negada. Clique no ícone de permissões do navegador para permitir o uso da câmera.";
-      } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
-        errorMsg += "Nenhuma câmera física foi encontrada no computador.";
-      } else if (err.name === "NotReadableError" || err.name === "TrackStartError") {
-        errorMsg += "A câmera já está em uso por outro aplicativo (Teams, Zoom, Meet, etc). Feche-o e tente novamente.";
-      } else {
-        errorMsg += (err.message || "Verifique se a câmera está conectada e liberada.");
-      }
-      showCameraError(errorMsg);
+      console.error("Erro ao iniciar webcam:", err);
+      showCameraError(err.message || "Erro de acesso à câmera selecionada.");
       updateStatusText("Câmera Desconectada", "red");
     }
   }
@@ -282,159 +316,463 @@ document.addEventListener('DOMContentLoaded', () => {
     videoElement.loop = true;
     videoElement.play();
     updateStatusText(`Vídeo: ${file.name}`, "green");
-    if (!isRunning) {
-      btnStart.click();
-    }
+    if (!isRunning) btnStart.click();
   }
 
   /**
-   * 1. GERADOR DE KEYPOINTS SINTÉTICOS (Modo Simulador)
+   * GERADOR DE KEYPOINTS SINTÉTICOS (Modo Simulador Biomecânico de Alta Precisão)
+   * Cinemática realista com movimento sincronizado de cabeça, ombros, tronco e quadril.
    */
   function generateSyntheticLandmarks() {
-    simTime += 0.04;
-    const squatDepthFactor = (Math.sin(simTime) + 1) / 2;
-    const isValgusCycle = Math.floor(simTime / (Math.PI * 2)) % 3 === 1;
-
-    const shoulderY = 0.28;
-    const hipY = 0.50 + squatDepthFactor * 0.18;
-    const kneeY = 0.70 + squatDepthFactor * 0.08;
-    const ankleY = 0.88;
-
-    const shoulderXDist = 0.12;
-    const hipXDist = 0.10;
-    let kneeXDist = 0.11;
-
-    if (isValgusCycle && squatDepthFactor > 0.4) {
-      kneeXDist = 0.04;
-    }
-
-    const ankleXDist = 0.11;
+    simTime += 0.035;
+    const exKey = exerciseSelect ? exerciseSelect.value : "squat";
     const lms = new Array(33).fill(0).map(() => ({ x: 0.5, y: 0.5, z: 0, visibility: 0.99 }));
 
-    lms[11] = { x: 0.5 - shoulderXDist, y: shoulderY, z: 0, visibility: 0.99 };
-    lms[12] = { x: 0.5 + shoulderXDist, y: shoulderY, z: 0, visibility: 0.99 };
-    lms[23] = { x: 0.5 - hipXDist, y: hipY, z: 0, visibility: 0.99 };
-    lms[24] = { x: 0.5 + hipXDist, y: hipY, z: 0, visibility: 0.99 };
-    lms[25] = { x: 0.5 - kneeXDist, y: kneeY, z: 0, visibility: 0.99 };
-    lms[26] = { x: 0.5 + kneeXDist, y: kneeY, z: 0, visibility: 0.99 };
-    lms[27] = { x: 0.5 - ankleXDist, y: ankleY, z: 0, visibility: 0.99 };
-    lms[28] = { x: 0.5 + ankleXDist, y: ankleY, z: 0, visibility: 0.99 };
-    lms[29] = { x: 0.5 - ankleXDist, y: ankleY + 0.02, z: 0, visibility: 0.99 };
-    lms[30] = { x: 0.5 + ankleXDist, y: ankleY + 0.02, z: 0, visibility: 0.99 };
+    if (exKey === "squat") {
+      // Cinemática Realista de Agachamento Terapêutico
+      const depth = (Math.sin(simTime) + 1) / 2; // 0 (em pé) a 1 (agachado a ~85-90°)
+      const isValgusCycle = Math.floor(simTime / (Math.PI * 2)) % 3 === 1;
+
+      // Ancoragem e Alturas Proporcionais Reais
+      const headBaseY = 0.16;
+      const shoulderBaseY = 0.28;
+      const hipBaseY = 0.52;
+      const kneeBaseY = 0.70;
+      const ankleY = 0.86;
+      const heelY = 0.88;
+
+      // Deslocamento vertical sincronizado de toda a parte superior do corpo
+      const verticalDrop = depth * 0.18;
+      const headY = headBaseY + verticalDrop;
+      const shoulderY = shoulderBaseY + verticalDrop;
+      const hipY = hipBaseY + verticalDrop;
+
+      // Flexão de Joelhos (Deslocamento anterior/lateral)
+      const kneeY = kneeBaseY + depth * 0.06;
+      const kneeXOffset = isValgusCycle && depth > 0.4 ? 0.03 : 0.12; // Se valgo, joelhos colapsam para dentro
+
+      // Cabeça & Face (Landmarks 0 a 10)
+      lms[0] = { x: 0.50, y: headY, z: -0.05, visibility: 0.99 };         // Nariz
+      lms[2] = { x: 0.48, y: headY - 0.01, z: -0.05, visibility: 0.99 };  // Olho E
+      lms[5] = { x: 0.52, y: headY - 0.01, z: -0.05, visibility: 0.99 };  // Olho D
+      lms[7] = { x: 0.46, y: headY, z: 0, visibility: 0.99 };             // Orelha E
+      lms[8] = { x: 0.54, y: headY, z: 0, visibility: 0.99 };             // Orelha D
+
+      // Tronco e Ombros (Landmarks 11, 12, 23, 24)
+      lms[11] = { x: 0.38, y: shoulderY, z: 0, visibility: 0.99 };        // Ombro E
+      lms[12] = { x: 0.62, y: shoulderY, z: 0, visibility: 0.99 };        // Ombro D
+      lms[23] = { x: 0.40, y: hipY, z: 0, visibility: 0.99 };             // Quadril E
+      lms[24] = { x: 0.60, y: hipY, z: 0, visibility: 0.99 };             // Quadril D
+
+      // Braços em Elevação Frontal de Equilíbrio
+      lms[13] = { x: 0.36, y: shoulderY + 0.10, z: -0.1, visibility: 0.99 }; // Cotovelo E
+      lms[14] = { x: 0.64, y: shoulderY + 0.10, z: -0.1, visibility: 0.99 }; // Cotovelo D
+      lms[15] = { x: 0.35, y: shoulderY + 0.18, z: -0.2, visibility: 0.99 }; // Pulso E
+      lms[16] = { x: 0.65, y: shoulderY + 0.18, z: -0.2, visibility: 0.99 }; // Pulso D
+
+      // Membros Inferiores (Landmarks 25 a 30)
+      lms[25] = { x: 0.50 - kneeXOffset, y: kneeY, z: -0.05, visibility: 0.99 }; // Joelho E
+      lms[26] = { x: 0.50 + kneeXOffset, y: kneeY, z: -0.05, visibility: 0.99 }; // Joelho D
+      lms[27] = { x: 0.38, y: ankleY, z: 0, visibility: 0.99 };                 // Tornozelo E
+      lms[28] = { x: 0.62, y: ankleY, z: 0, visibility: 0.99 };                 // Tornozelo D
+      lms[29] = { x: 0.38, y: heelY, z: 0.05, visibility: 0.99 };              // Calcanhar E
+      lms[30] = { x: 0.62, y: heelY, z: 0.05, visibility: 0.99 };              // Calcanhar D
+    } else if (exKey === "shoulder_abduction") {
+      // Abdução de Ombro (Elevação Lateral)
+      const factor = (Math.sin(simTime) + 1) / 2;
+      const armAngle = factor * (Math.PI / 2); // 0 a 90°
+
+      const shoulderY = 0.28;
+      const hipY = 0.52;
+      const kneeY = 0.70;
+      const ankleY = 0.86;
+
+      lms[0] = { x: 0.50, y: 0.16, z: 0, visibility: 0.99 };
+      lms[11] = { x: 0.38, y: shoulderY, z: 0, visibility: 0.99 };
+      lms[12] = { x: 0.62, y: shoulderY, z: 0, visibility: 0.99 };
+      lms[23] = { x: 0.41, y: hipY, z: 0, visibility: 0.99 };
+      lms[24] = { x: 0.59, y: hipY, z: 0, visibility: 0.99 };
+      lms[25] = { x: 0.41, y: kneeY, z: 0, visibility: 0.99 };
+      lms[26] = { x: 0.59, y: kneeY, z: 0, visibility: 0.99 };
+      lms[27] = { x: 0.41, y: ankleY, z: 0, visibility: 0.99 };
+      lms[28] = { x: 0.59, y: ankleY, z: 0, visibility: 0.99 };
+
+      const armLen1 = 0.16;
+      const armLen2 = 0.16;
+      lms[13] = { x: 0.38 - Math.sin(armAngle) * armLen1, y: shoulderY + Math.cos(armAngle) * armLen1, z: 0, visibility: 0.99 };
+      lms[14] = { x: 0.62 + Math.sin(armAngle) * armLen1, y: shoulderY + Math.cos(armAngle) * armLen1, z: 0, visibility: 0.99 };
+      lms[15] = { x: 0.38 - Math.sin(armAngle) * (armLen1 + armLen2), y: shoulderY + Math.cos(armAngle) * (armLen1 + armLen2), z: 0, visibility: 0.99 };
+      lms[16] = { x: 0.62 + Math.sin(armAngle) * (armLen1 + armLen2), y: shoulderY + Math.cos(armAngle) * (armLen1 + armLen2), z: 0, visibility: 0.99 };
+    } else if (exKey === "biceps_curl") {
+      // Rosca Direta de Bíceps
+      const curlFactor = (Math.sin(simTime) + 1) / 2;
+      const shoulderY = 0.28;
+      const hipY = 0.52;
+      const kneeY = 0.70;
+      const ankleY = 0.86;
+
+      lms[0] = { x: 0.50, y: 0.16, z: 0, visibility: 0.99 };
+      lms[11] = { x: 0.38, y: shoulderY, z: 0, visibility: 0.99 };
+      lms[12] = { x: 0.62, y: shoulderY, z: 0, visibility: 0.99 };
+      lms[23] = { x: 0.41, y: hipY, z: 0, visibility: 0.99 };
+      lms[24] = { x: 0.59, y: hipY, z: 0, visibility: 0.99 };
+      lms[25] = { x: 0.41, y: kneeY, z: 0, visibility: 0.99 };
+      lms[26] = { x: 0.59, y: kneeY, z: 0, visibility: 0.99 };
+      lms[27] = { x: 0.41, y: ankleY, z: 0, visibility: 0.99 };
+      lms[28] = { x: 0.59, y: ankleY, z: 0, visibility: 0.99 };
+
+      lms[13] = { x: 0.37, y: shoulderY + 0.16, z: 0, visibility: 0.99 }; // Cotovelo fixo
+      lms[14] = { x: 0.63, y: shoulderY + 0.16, z: 0, visibility: 0.99 };
+
+      const wristY = (shoulderY + 0.32) - curlFactor * 0.24;
+      const wristXOffset = curlFactor * 0.03;
+      lms[15] = { x: 0.37 + wristXOffset, y: wristY, z: -curlFactor * 0.1, visibility: 0.99 };
+      lms[16] = { x: 0.63 - wristXOffset, y: wristY, z: -curlFactor * 0.1, visibility: 0.99 };
+    } else if (exKey === "triceps_extension") {
+      // Extensão de Tríceps Coice
+      const extFactor = (Math.sin(simTime) + 1) / 2;
+      const shoulderY = 0.28;
+      const hipY = 0.52;
+      const kneeY = 0.70;
+      const ankleY = 0.86;
+
+      lms[0] = { x: 0.50, y: 0.16, z: 0, visibility: 0.99 };
+      lms[11] = { x: 0.38, y: shoulderY, z: 0, visibility: 0.99 };
+      lms[12] = { x: 0.62, y: shoulderY, z: 0, visibility: 0.99 };
+      lms[23] = { x: 0.41, y: hipY, z: 0, visibility: 0.99 };
+      lms[24] = { x: 0.59, y: hipY, z: 0, visibility: 0.99 };
+      lms[25] = { x: 0.41, y: kneeY, z: 0, visibility: 0.99 };
+      lms[26] = { x: 0.59, y: kneeY, z: 0, visibility: 0.99 };
+      lms[27] = { x: 0.41, y: ankleY, z: 0, visibility: 0.99 };
+      lms[28] = { x: 0.59, y: ankleY, z: 0, visibility: 0.99 };
+
+      lms[13] = { x: 0.34, y: shoulderY + 0.10, z: 0, visibility: 0.99 };
+      lms[14] = { x: 0.66, y: shoulderY + 0.10, z: 0, visibility: 0.99 };
+
+      const wristX = 0.34 - extFactor * 0.18;
+      const wristY = (shoulderY + 0.24) - extFactor * 0.14;
+      lms[15] = { x: wristX, y: wristY, z: 0, visibility: 0.99 };
+      lms[16] = { x: 1 - wristX, y: wristY, z: 0, visibility: 0.99 };
+    }
 
     return lms;
   }
 
   /**
-   * 2. RENDERIZADOR DO OVERLAY CANVASES (DESENHO BIOMECÂNICO)
+   * RENDERIZADOR VOLUMÉTRICO AVANÇADO DE MANEQUIM 3D E ESTÚDIO BIOMECÂNICO
    */
   function renderBiomechanicalOverlay(landmarks, data, isMirrored = false) {
     const width = canvasElement.width;
     const height = canvasElement.height;
+    const isSimulated = sourceSelect.value === 'simulated';
 
     if (!landmarks || landmarks.length < 33) return;
 
-    // Em modo espelhado (webcam), inverte X no canvas para combinar com a imagem espelhada
+    // 1. RENDERIZAR ESTÚDIO DE ANÁLISE 3D FUTURISTA (SE MODO SIMULADOR)
+    if (isSimulated) {
+      drawStudioGridEnvironment(canvasCtx, width, height);
+    }
+
     const toPx = (lm) => {
       const xPx = isMirrored ? (1 - lm.x) * width : lm.x * width;
       return { x: xPx, y: lm.y * height };
     };
 
-    const p11 = toPx(landmarks[11]); // Ombro E
-    const p12 = toPx(landmarks[12]); // Ombro D
-    const p23 = toPx(landmarks[23]); // Quadril E
-    const p24 = toPx(landmarks[24]); // Quadril D
-    const p25 = toPx(landmarks[25]); // Joelho E
-    const p26 = toPx(landmarks[26]); // Joelho D
-    const p27 = toPx(landmarks[27]); // Tornozelo E
-    const p28 = toPx(landmarks[28]); // Tornozelo D
+    const nose = lmsToPx(landmarks[0], toPx);
+    const p11 = lmsToPx(landmarks[11], toPx); // Ombro E
+    const p12 = lmsToPx(landmarks[12], toPx); // Ombro D
+    const p13 = lmsToPx(landmarks[13], toPx); // Cotovelo E
+    const p14 = lmsToPx(landmarks[14], toPx); // Cotovelo D
+    const p15 = lmsToPx(landmarks[15], toPx); // Pulso E
+    const p16 = lmsToPx(landmarks[16], toPx); // Pulso D
+    const p23 = lmsToPx(landmarks[23], toPx); // Quadril E
+    const p24 = lmsToPx(landmarks[24], toPx); // Quadril D
+    const p25 = lmsToPx(landmarks[25], toPx); // Joelho E
+    const p26 = lmsToPx(landmarks[26], toPx); // Joelho D
+    const p27 = lmsToPx(landmarks[27], toPx); // Tornozelo E
+    const p28 = lmsToPx(landmarks[28], toPx); // Tornozelo D
 
-    const isValgus = data?.falhasDetectadas?.valgoDinamico;
-    const isGoodAngle = data?.angulosAtuais?.joelhoMedioDeg <= 92 && data?.angulosAtuais?.joelhoMedioDeg >= 78;
-    
-    let jointColor = "#06b6d4"; // Cyan
-    if (isValgus) jointColor = "#ef4444"; // Red
-    else if (isGoodAngle) jointColor = "#10b981"; // Emerald Green
+    const isAlert = data?.qualidadeExecucao?.status !== "EXCELENTE";
+    const statusColor = isAlert ? "#ef4444" : "#10b981";
+    const accentColor = isAlert ? "rgba(239, 68, 68, 0.35)" : "rgba(16, 185, 129, 0.25)";
 
-    canvasCtx.lineWidth = 4;
-    canvasCtx.lineJoin = 'round';
-    canvasCtx.lineCap = 'round';
-
-    // Connections
-    const connections = [
-      [p11, p12], [p11, p23], [p12, p24], [p23, p24],
-      [p23, p25], [p25, p27],
-      [p24, p26], [p26, p28]
-    ];
-
-    connections.forEach(([from, to]) => {
+    // 2. RENDERIZAR MALHA VOLUMÉTRICA DO TRONCO (PEITORAL / ABDÔMEN)
+    if (p11 && p12 && p23 && p24) {
+      canvasCtx.save();
       canvasCtx.beginPath();
-      canvasCtx.moveTo(from.x, from.y);
-      canvasCtx.lineTo(to.x, to.y);
-      canvasCtx.strokeStyle = jointColor;
-      canvasCtx.shadowColor = jointColor;
-      canvasCtx.shadowBlur = 10;
-      canvasCtx.stroke();
-    });
-    canvasCtx.shadowBlur = 0;
+      canvasCtx.moveTo(p11.x, p11.y);
+      canvasCtx.lineTo(p12.x, p12.y);
+      canvasCtx.lineTo(p24.x, p24.y);
+      canvasCtx.lineTo(p23.x, p23.y);
+      canvasCtx.closePath();
 
-    // Joint Nodes
-    [p11, p12, p23, p24, p25, p26, p27, p28].forEach(pt => {
-      canvasCtx.beginPath();
-      canvasCtx.arc(pt.x, pt.y, 7, 0, 2 * Math.PI);
-      canvasCtx.fillStyle = "#ffffff";
+      const torsoGrad = canvasCtx.createLinearGradient(0, p11.y, 0, p23.y);
+      torsoGrad.addColorStop(0, accentColor);
+      torsoGrad.addColorStop(1, "rgba(6, 182, 212, 0.05)");
+
+      canvasCtx.fillStyle = torsoGrad;
       canvasCtx.fill();
-      canvasCtx.lineWidth = 2;
-      canvasCtx.strokeStyle = jointColor;
+      canvasCtx.lineWidth = 1.5;
+      canvasCtx.strokeStyle = statusColor;
       canvasCtx.stroke();
-    });
-
-    // Angles
-    if (data && data.angulosAtuais) {
-      drawAngleArc(canvasCtx, p25, `${Math.round(data.angulosAtuais.joelhoEsquerdoDeg)}°`, jointColor);
-      drawAngleArc(canvasCtx, p26, `${Math.round(data.angulosAtuais.joelhoDireitoDeg)}°`, jointColor);
+      canvasCtx.restore();
     }
 
-    // Valgus line warning
-    if (isValgus) {
+    // 3. RENDERIZAR CABEÇA E MANEQUIM FACIAL
+    if (nose && p11 && p12) {
+      const shoulderCenterX = (p11.x + p12.x) / 2;
+      const shoulderCenterY = (p11.y + p12.y) / 2;
+      const headRadius = Math.max(18, Math.abs(p12.x - p11.x) * 0.25);
+
+      canvasCtx.save();
+      // Cabeça
+      canvasCtx.beginPath();
+      canvasCtx.arc(shoulderCenterX, nose.y - 5, headRadius, 0, Math.PI * 2);
+      canvasCtx.fillStyle = "rgba(15, 23, 42, 0.8)";
+      canvasCtx.fill();
+      canvasCtx.lineWidth = 2;
+      canvasCtx.strokeStyle = statusColor;
+      canvasCtx.stroke();
+
+      // Viseira Tecnológica Futurista
+      drawRoundRect(canvasCtx, shoulderCenterX - headRadius * 0.6, nose.y - 12, headRadius * 1.2, 8, 4);
+      canvasCtx.fillStyle = isAlert ? "#fca5a5" : "#38bdf8";
+      canvasCtx.shadowColor = isAlert ? "#ef4444" : "#0284c7";
+      canvasCtx.shadowBlur = 8;
+      canvasCtx.fill();
+      canvasCtx.restore();
+    }
+
+    // 4. RENDERIZAR SEGMENTOS MUSCULARES VOLUMÉTRICOS (CÁPSULAS ANATÔMICAS)
+    const capsules = [
+      [p11, p13, 14], [p13, p15, 11], // Braço E, Antebraço E
+      [p12, p14, 14], [p14, p16, 11], // Braço D, Antebraço D
+      [p23, p25, 20], [p25, p27, 16], // Coxa E (Quads), Perna E
+      [p24, p26, 20], [p26, p28, 16]  // Coxa D (Quads), Perna D
+    ];
+
+    capsules.forEach(([from, to, radius]) => {
+      if (from && to) {
+        drawLimbCapsule(canvasCtx, from, to, radius, statusColor, isAlert);
+      }
+    });
+
+    // 5. RENDERIZAR ESFERAS ARTICULARES E ANÉIS
+    const jointNodes = [p11, p12, p13, p14, p15, p16, p23, p24, p25, p26, p27, p28];
+    jointNodes.forEach(pt => {
+      if (!pt) return;
+      canvasCtx.save();
+      // Brilho Neon Externo
+      canvasCtx.beginPath();
+      canvasCtx.arc(pt.x, pt.y, 8, 0, 2 * Math.PI);
+      canvasCtx.fillStyle = "rgba(255, 255, 255, 0.9)";
+      canvasCtx.shadowColor = statusColor;
+      canvasCtx.shadowBlur = 12;
+      canvasCtx.fill();
+
+      // Anel metálico
+      canvasCtx.lineWidth = 2;
+      canvasCtx.strokeStyle = statusColor;
+      canvasCtx.stroke();
+      canvasCtx.restore();
+    });
+
+    // 6. RENDERIZAR MEDIDOR DE ÂNGULO E VETORES
+    if (data && data.angulosAtuais) {
+      const exKey = data.exerciseKey || "squat";
+      if (exKey === "squat" && p25) {
+        drawAngleBadge(canvasCtx, p25, `${Math.round(data.angulosAtuais.principalDeg)}°`, statusColor, "Flexão Joelho");
+      } else if (exKey === "shoulder_abduction" && p11) {
+        drawAngleBadge(canvasCtx, p11, `${Math.round(data.angulosAtuais.principalDeg)}°`, statusColor, "Abdução Ombro");
+      } else if ((exKey === "biceps_curl" || exKey === "triceps_extension") && p13) {
+        drawAngleBadge(canvasCtx, p13, `${Math.round(data.angulosAtuais.principalDeg)}°`, statusColor, "Flexão Cotovelo");
+      }
+    }
+
+    // 7. ALERTA VISUAL DE VETOR DE VALGO (SE DETECTADO)
+    if (data?.falhasDetectadas?.valgoDinamico && p25 && p26) {
+      canvasCtx.save();
       canvasCtx.beginPath();
       canvasCtx.setLineDash([6, 6]);
       canvasCtx.moveTo(p25.x, p25.y);
       canvasCtx.lineTo(p26.x, p26.y);
       canvasCtx.strokeStyle = "#ef4444";
+      canvasCtx.lineWidth = 3;
       canvasCtx.stroke();
-      canvasCtx.setLineDash([]);
+
+      // Seta de força medial
+      const midX = (p25.x + p26.x) / 2;
+      const midY = (p25.y + p26.y) / 2;
+      canvasCtx.font = "bold 12px Inter, sans-serif";
+      canvasCtx.fillStyle = "#ef4444";
+      canvasCtx.fillText("⚠️ COLAPSO MEDIAL (VALGO)", midX - 80, midY - 10);
+      canvasCtx.restore();
     }
   }
 
-  function drawAngleArc(ctx, vertex, labelText, color) {
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(vertex.x, vertex.y, 24, 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(0, 0, 0, 0.4)";
-    ctx.fill();
+  function lmsToPx(lm, toPxFn) {
+    return lm ? toPxFn(lm) : null;
+  }
 
-    ctx.font = "bold 13px Outfit, sans-serif";
-    ctx.fillStyle = color;
-    ctx.textAlign = "center";
-    ctx.fillText(labelText, vertex.x, vertex.y + 35);
+  /**
+   * RENDERIZADOR DE ESTÚDIO BIOMECÂNICO FUTURISTA (BACKGROUND GRID)
+   */
+  function drawStudioGridEnvironment(ctx, w, h) {
+    ctx.save();
+    // Fundo Degradê Estúdio Neon Dark
+    const bgGrad = ctx.createRadialGradient(w / 2, h / 2, 50, w / 2, h / 2, w * 0.75);
+    bgGrad.addColorStop(0, "#0f172a");
+    bgGrad.addColorStop(1, "#020617");
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, w, h);
+
+    // Grade de Perspectiva 3D do Solo
+    const horizonY = h * 0.58;
+    ctx.strokeStyle = "rgba(51, 65, 85, 0.35)";
+    ctx.lineWidth = 1;
+
+    // Linhas Verticais de Perspectiva
+    for (let x = -w; x <= w * 2; x += w / 8) {
+      ctx.beginPath();
+      ctx.moveTo(w / 2, horizonY);
+      ctx.lineTo(x, h);
+      ctx.stroke();
+    }
+
+    // Linhas Horizontais do Solo
+    for (let y = horizonY; y <= h; y += (h - horizonY) / 6) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(w, y);
+      ctx.stroke();
+    }
+
+    // Plataforma Circular sob os pés do paciente
+    ctx.beginPath();
+    ctx.ellipse(w / 2, h * 0.88, w * 0.28, h * 0.06, 0, 0, Math.PI * 2);
+    ctx.strokeStyle = "rgba(6, 182, 212, 0.4)";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([8, 6]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Régua de Calibração Lateral de Altura
+    ctx.strokeStyle = "rgba(148, 163, 184, 0.25)";
+    ctx.fillStyle = "rgba(148, 163, 184, 0.6)";
+    ctx.font = "10px Inter, monospace";
+    ctx.beginPath();
+    ctx.moveTo(25, 40);
+    ctx.lineTo(25, h - 40);
+    ctx.stroke();
+
+    for (let y = 60; y < h - 40; y += 40) {
+      ctx.beginPath();
+      ctx.moveTo(20, y);
+      ctx.lineTo(30, y);
+      ctx.stroke();
+      const heightMeters = ((h - y) / h * 2.2).toFixed(1);
+      ctx.fillText(`${heightMeters}m`, 34, y + 3);
+    }
+
     ctx.restore();
   }
 
   /**
-   * 3. ATUALIZAÇÃO DA INTERFACE DO PACIENTE
+   * RENDERIZADOR DE CÁPSULAS ANATÔMICAS VOLUMÉTRICAS DE MEMBROS
+   */
+  function drawLimbCapsule(ctx, pA, pB, radius, color, isAlert) {
+    const dx = pB.x - pA.x;
+    const dy = pB.y - pA.y;
+    const len = Math.hypot(dx, dy);
+    if (len === 0) return;
+
+    const angle = Math.atan2(dy, dx);
+
+    ctx.save();
+    ctx.translate(pA.x, pA.y);
+    ctx.rotate(angle);
+
+    ctx.beginPath();
+    ctx.arc(0, 0, radius, Math.PI / 2, (3 * Math.PI) / 2);
+    ctx.lineTo(len, -radius);
+    ctx.arc(len, 0, radius, (3 * Math.PI) / 2, Math.PI / 2);
+    ctx.closePath();
+
+    ctx.fillStyle = isAlert ? "rgba(239, 68, 68, 0.15)" : "rgba(6, 182, 212, 0.12)";
+    ctx.fill();
+
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = color;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 6;
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  /**
+   * HELPER SEGURO DE RETÂNGULO COM CANTOS ARREDONDADOS
+   */
+  function drawRoundRect(ctx, x, y, width, height, radius) {
+    ctx.beginPath();
+    if (typeof ctx.roundRect === 'function') {
+      ctx.roundRect(x, y, width, height, radius);
+    } else {
+      ctx.moveTo(x + radius, y);
+      ctx.lineTo(x + width - radius, y);
+      ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+      ctx.lineTo(x + width, y + height - radius);
+      ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+      ctx.lineTo(x + radius, y + height);
+      ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+      ctx.lineTo(x, y + radius);
+      ctx.quadraticCurveTo(x, y, x + radius, y);
+    }
+  }
+
+  /**
+   * CRACHÁ DE ÂNGULO COM TIPOGRAFIA MODERNA E INDICADOR ARTICULAR
+   */
+  function drawAngleBadge(ctx, vertex, labelText, color, jointTitle) {
+    ctx.save();
+    const boxW = 86;
+    const boxH = 34;
+    const x = vertex.x - boxW / 2;
+    const y = vertex.y + 25;
+
+    drawRoundRect(ctx, x, y, boxW, boxH, 8);
+    ctx.fillStyle = "rgba(15, 23, 42, 0.88)";
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = color;
+    ctx.stroke();
+
+    ctx.font = "bold 13px Outfit, sans-serif";
+    ctx.fillStyle = color;
+    ctx.textAlign = "center";
+    ctx.fillText(labelText, vertex.x, y + 16);
+
+    ctx.font = "9px Inter, sans-serif";
+    ctx.fillStyle = "#94a3b8";
+    ctx.fillText(jointTitle, vertex.x, y + 28);
+    ctx.restore();
+  }
+
+  /**
+   * ATUALIZAÇÃO DA INTERFACE DO PACIENTE
    */
   function updatePatientUI(data) {
     if (!data || !data.angulosAtuais) return;
 
-    const faseMap = {
-      "standing": "EM PÉ (NEUTRO)",
-      "eccentric": "AGACHANDO (EXCÊNTRICA)",
-      "bottom_hold": "PONTO CRÍTICO (ALVO 80°-90°)",
-      "concentric": "SUBINDO (CONCÊNTRICA)"
-    };
-    hudPhaseText.textContent = faseMap[data.faseMovimento] || data.faseMovimento.toUpperCase();
-    hudKneeAngle.textContent = `${data.angulosAtuais.joelhoMedioDeg.toFixed(0)}°`;
+    hudPhaseText.textContent = data.faseMovimento ? data.faseMovimento.toUpperCase() : "NEUTRO";
+    hudKneeAngle.textContent = `${data.angulosAtuais.principalDeg.toFixed(0)}°`;
+    if (hudAngleSub) hudAngleSub.textContent = data.targetJointName || "Ângulo Alvo";
+
+    // Regulador de Distância
+    if (data.distanceEval && canvasDistanceToast) {
+      canvasDistanceMsg.textContent = data.distanceEval.message;
+      canvasDistanceToast.className = `canvas-distance-toast ${data.distanceEval.status.toLowerCase().replace('_', '-')}`;
+    }
 
     const status = data.qualidadeExecucao.status;
     const msg = data.qualidadeExecucao.mensagemFeedback;
@@ -451,44 +789,19 @@ document.addEventListener('DOMContentLoaded', () => {
       canvasWarningToast.classList.add('hidden');
     }
 
-    valKneeAngle.textContent = `${data.angulosAtuais.joelhoMedioDeg.toFixed(1)}°`;
-    const kneePct = Math.min(100, Math.max(0, ((180 - data.angulosAtuais.joelhoMedioDeg) / 100) * 100));
-    barKneeFlexion.style.width = `${kneePct}%`;
+    valKneeAngle.textContent = `${data.angulosAtuais.principalDeg.toFixed(1)}°`;
+    const mainPct = Math.min(100, Math.max(0, (data.angulosAtuais.principalDeg / 180) * 100));
+    barKneeFlexion.style.width = `${mainPct}%`;
 
-    valTrunkAngle.textContent = `${data.angulosAtuais.troncoInclinacaoDeg.toFixed(1)}°`;
-    const trunkPct = Math.min(100, (data.angulosAtuais.troncoInclinacaoDeg / 45) * 100);
-    barTrunkAngle.style.width = `${trunkPct}%`;
-
-    if (data.falhasDetectadas.valgoDinamico) {
-      valValgusStatus.textContent = "VALGO DETECTADO!";
-      valValgusStatus.className = "metric-value status-alert";
-      indicatorValgus.className = "status-indicator-bar alert";
-    } else {
-      valValgusStatus.textContent = "Normal";
-      valValgusStatus.className = "metric-value status-ok";
-      indicatorValgus.className = "status-indicator-bar";
-    }
-
-    if (data.falhasDetectadas.calcanharElevado) {
-      valHeelStatus.textContent = "CALCANHAR ELEVADO!";
-      valHeelStatus.className = "metric-value status-alert";
-      indicatorHeel.className = "status-indicator-bar alert";
-    } else {
-      valHeelStatus.textContent = "Apoiados";
-      valHeelStatus.className = "metric-value status-ok";
-      indicatorHeel.className = "status-indicator-bar";
-    }
+    valTrunkAngle.textContent = `${data.angulosAtuais.secundarioDeg.toFixed(1)}°`;
+    const secPct = Math.min(100, (data.angulosAtuais.secundarioDeg / 45) * 100);
+    barTrunkAngle.style.width = `${secPct}%`;
 
     repTotal.textContent = data.repeticoes.completas;
     repCorrect.textContent = data.repeticoes.corretas;
     repFaults.textContent = data.repeticoes.comCompensacao;
 
-    const cameraLabelMap = {
-      "simulated": "Câmera Mobile 1 - Agrupador Sintético Frontal",
-      "webcam": "Câmera Mobile 1 - Vista Frontal ao Vivo (Webcam)",
-      "video": "Câmera Mobile 1 - Arquivo de Vídeo Processado"
-    };
-    const activeCam = cameraLabelMap[sourceSelect.value] || "Câmera Mobile 1 - Vista Frontal";
+    const activeCam = sourceSelect.value === 'webcam' ? "Câmera BioPhysio IoT - Vista Frontal ao Vivo" : "Câmera BioPhysio IoT - Simulador Sintético";
     currentJSONProtocol = analyzer.formatJSONProtocol(data, activeCam);
     jsonStreamOutput.textContent = currentJSONProtocol;
 
@@ -497,7 +810,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /**
-   * 4. LOOP PRINCIPAL DE PROCESSAMENTO EM TEMPO REAL
+   * LOOP PRINCIPAL DE PROCESSAMENTO
    */
   async function mainLoop() {
     if (!isRunning) return;
@@ -530,18 +843,93 @@ document.addEventListener('DOMContentLoaded', () => {
     animationFrameId = requestAnimationFrame(mainLoop);
   }
 
-  // 5. EVENT LISTENERS E CONTROLES
+  // EVENT LISTENERS DE INTERFAZ E REQUISITOS FASE 2
+
+  // 1. Troca de Exercício Modular
+  if (exerciseSelect) {
+    exerciseSelect.addEventListener('change', (e) => {
+      const selectedId = e.target.value;
+      analyzer.setExercise(selectedId);
+      btnReset.click();
+    });
+  }
+
+  // 2. Conexão Arduino (IoT) via Web Serial
+  if (btnConnectArduino) {
+    btnConnectArduino.addEventListener('click', async () => {
+      try {
+        await analyzer.iotBridge.connect();
+        btnConnectArduino.classList.remove('btn-outline');
+        btnConnectArduino.classList.add('btn-primary');
+        btnConnectArduino.innerHTML = `<i data-lucide="cpu"></i> Arduino Conectado`;
+        if (window.lucide) lucide.createIcons();
+      } catch (err) {
+        alert(`Não foi possível conectar ao Arduino: ${err.message}`);
+      }
+    });
+  }
+
+  // 3. Trava de Rastreamento de Paciente ao Clicar no Canvas
+  canvasElement.addEventListener('click', (e) => {
+    const rect = canvasElement.getBoundingClientRect();
+    const clickX = (e.clientX - rect.left) / rect.width;
+    const clickY = (e.clientY - rect.top) / rect.height;
+
+    analyzer.subjectTracker.setTarget(clickX, clickY);
+    if (canvasLockBadge) canvasLockBadge.classList.remove('hidden');
+  });
+
+  if (btnUnlockSubject) {
+    btnUnlockSubject.addEventListener('click', (e) => {
+      e.stopPropagation();
+      analyzer.subjectTracker.clearTarget();
+      if (canvasLockBadge) canvasLockBadge.classList.add('hidden');
+    });
+  }
+
+  // 4. Detecção e Seleção de Câmeras Físicas
+  if (btnScanCameras) {
+    btnScanCameras.addEventListener('click', async () => {
+      sourceSelect.value = 'webcam';
+      const videoDevices = await detectAvailableCameras();
+      if (videoDevices.length > 0) {
+        await startWebcamStream(videoDevices[0].deviceId);
+      }
+    });
+  }
+
+  if (btnScanCamerasError) {
+    btnScanCamerasError.addEventListener('click', async () => {
+      sourceSelect.value = 'webcam';
+      const videoDevices = await detectAvailableCameras();
+      if (videoDevices.length > 0) {
+        await startWebcamStream(videoDevices[0].deviceId);
+      }
+    });
+  }
+
+  if (cameraDeviceSelect) {
+    cameraDeviceSelect.addEventListener('change', async (e) => {
+      if (e.target.value) {
+        sourceSelect.value = 'webcam';
+        await startWebcamStream(e.target.value);
+      }
+    });
+  }
 
   sourceSelect.addEventListener('change', async (e) => {
     const val = e.target.value;
     if (val === 'simulated') {
       stopMediaStream();
       hideCameraError();
+      if (cameraDeviceSelect) cameraDeviceSelect.classList.add('hidden');
       updateStatusText("Motor Conectado (30 FPS)", "green");
     } else if (val === 'webcam') {
+      await detectAvailableCameras();
       await startWebcamStream();
     } else if (val === 'video') {
       stopMediaStream();
+      if (cameraDeviceSelect) cameraDeviceSelect.classList.add('hidden');
       videoFileInput.click();
     }
   });
@@ -555,6 +943,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (btnRetryCamera) {
     btnRetryCamera.addEventListener('click', async () => {
       if (sourceSelect.value === 'webcam') {
+        await detectAvailableCameras();
         await startWebcamStream();
       }
     });
@@ -605,7 +994,7 @@ document.addEventListener('DOMContentLoaded', () => {
       btnCopyJson.innerHTML = `<i data-lucide="check"></i> Copiado!`;
       setTimeout(() => {
         btnCopyJson.innerHTML = `<i data-lucide="copy"></i> Copiar`;
-        lucide.createIcons();
+        if (window.lucide) lucide.createIcons();
       }, 2000);
     }
   });
@@ -621,6 +1010,7 @@ document.addEventListener('DOMContentLoaded', () => {
     downloadAnchor.remove();
   });
 
-  // Iniciar por padrão no modo Simulador para demonstração imediata
+  // Iniciar simulador por padrão
   btnStart.click();
 });
+

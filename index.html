@@ -41,7 +41,11 @@
           <span class="pulse-dot green"></span>
           <span id="status-text">Motor Conectado (30 FPS)</span>
         </div>
-        
+
+        <button id="btn-connect-arduino" class="btn btn-sm btn-outline" title="Conectar ao Arduino via Web Serial (IoT)">
+          <i data-lucide="cpu"></i> Conectar Arduino (IoT)
+        </button>
+
         <button id="btn-toggle-voice" class="btn-icon active" title="Ativar/Desativar Sintetizador de Voz">
           <i data-lucide="volume-2"></i>
         </button>
@@ -56,16 +60,35 @@
         <div class="card-header">
           <div class="card-title">
             <i data-lucide="camera"></i>
-            <h2>Interface de Captação (Agrupador)</h2>
+            <h2>Interface de Captação & Exercício</h2>
           </div>
-          
-          <div class="source-selector">
-            <label for="input-source-select" class="sr-only">Fonte de Entrada</label>
+
+          <div class="selector-group" style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+            <select id="exercise-select" class="select-input" style="font-weight: 600; border-color: var(--color-primary);">
+              <optgroup label="Membros Inferiores">
+                <option value="squat">🏋️ Agachamento Terapêutico</option>
+              </optgroup>
+              <optgroup label="Membros Superiores (Fase 2)">
+                <option value="shoulder_abduction">🦾 Abdução de Ombro (Elevação)</option>
+                <option value="biceps_curl">💪 Rosca Direta de Bíceps</option>
+                <option value="triceps_extension">💥 Extensão de Tríceps (Coice)</option>
+              </optgroup>
+            </select>
+
             <select id="input-source-select" class="select-input">
               <option value="simulated">⚡ Simulador Sintético (Demonstração 3D)</option>
               <option value="webcam">📷 Câmera ao Vivo (Webcam)</option>
               <option value="video">📁 Carregar Arquivo de Vídeo</option>
             </select>
+
+            <select id="camera-device-select" class="select-input hidden" style="border-color: var(--color-success); font-weight: 500;">
+              <option value="">🔍 Procurando Câmeras...</option>
+            </select>
+
+            <button id="btn-scan-cameras" class="btn btn-sm btn-outline" title="Localizar e listar câmeras presentes neste computador/dispositivo">
+              <i data-lucide="video"></i> Detectar Câmeras
+            </button>
+
             <input type="file" id="video-file-input" accept="video/*" style="display: none;">
           </div>
         </div>
@@ -75,6 +98,19 @@
           <video id="input-video" playsinline muted style="display: none;"></video>
           <canvas id="output-canvas"></canvas>
           
+          <!-- Camera Distance Calibration Toast -->
+          <div class="canvas-distance-toast" id="canvas-distance-toast">
+            <i data-lucide="ruler"></i>
+            <span id="canvas-distance-msg">Verificando enquadramento...</span>
+          </div>
+
+          <!-- Subject Tracker Lock Badge -->
+          <div class="canvas-lock-badge hidden" id="canvas-lock-badge">
+            <i data-lucide="user-check"></i>
+            <span>Paciente Alvo Travado</span>
+            <button id="btn-unlock-subject" title="Desdestravar paciente alvo">×</button>
+          </div>
+
           <!-- Floating Status Overlay -->
           <div class="hud-phase-overlay" id="hud-phase-overlay">
             <span class="hud-label">FASE ATUAL</span>
@@ -84,13 +120,13 @@
           <!-- Angle Quick Badge -->
           <div class="hud-angle-badge" id="hud-angle-badge">
             <span class="angle-val" id="hud-knee-angle">175°</span>
-            <span class="angle-sub">Ângulo Joelhos</span>
+            <span class="angle-sub" id="hud-angle-sub">Ângulo Alvo</span>
           </div>
 
           <!-- Dynamic Warning Toast on Canvas -->
           <div class="canvas-warning-toast hidden" id="canvas-warning-toast">
             <i data-lucide="alert-triangle"></i>
-            <span id="canvas-warning-msg">Valgo Dinâmico Detectado!</span>
+            <span id="canvas-warning-msg">Compensação Postural Detectada!</span>
           </div>
 
           <!-- Camera Error / Permission Banner -->
@@ -100,9 +136,14 @@
               <strong id="camera-error-title">Câmera Não Conectada</strong>
               <p id="camera-error-msg">Não foi possível acessar a câmera do computador. Verifique as permissões do seu navegador.</p>
             </div>
-            <button id="btn-retry-camera" class="btn btn-sm btn-primary">
-              <i data-lucide="refresh-cw"></i> Tentar Novamente
-            </button>
+            <div class="camera-error-actions" style="display: flex; gap: 0.5rem;">
+              <button id="btn-retry-camera" class="btn btn-sm btn-primary">
+                <i data-lucide="refresh-cw"></i> Tentar Novamente
+              </button>
+              <button id="btn-scan-cameras-error" class="btn btn-sm btn-outline" style="background: rgba(255,255,255,0.1); border-color: #fff; color: #fff;">
+                <i data-lucide="video"></i> Detectar Câmeras
+              </button>
+            </div>
           </div>
         </div>
 

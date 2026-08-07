@@ -1,52 +1,118 @@
 /**
- * BioPhysio AI - Motor de Análise Biomecânica
- * Desenvolvido por: Engenheiro de Visão Computacional & Fisioterapeuta Biomecânico
+ * BioPhysio AI - Motor de Análise Biomecânica (Fase 2)
+ * Desenvolvido por: Arquitetura de Sistemas & Visão Computacional / IoT
  */
 
 /**
- * Filtro Espacial Low-Pass (Exponential Moving Average) para Suavização de Keypoints
+ * 1€ Filter (One Euro Filter) para Suavização Adaptativa de Keypoints 3D
+ * Reduz tremores em baixa velocidade e elimina lag em alta velocidade.
  */
-class KeypointSpatialFilter {
-  constructor(alpha = 0.35) {
-    this.alpha = alpha; // Fator de suavização (0 < alpha <= 1)
-    this.prevKeypoints = null;
+class OneEuroFilter {
+  constructor(freq = 30, minCutoff = 1.0, beta = 0.007, dCutoff = 1.0) {
+    this.freq = freq;
+    this.minCutoff = minCutoff;
+    this.beta = beta;
+    this.dCutoff = dCutoff;
+
+    this.xPrev = null;
+    this.dxPrev = null;
+    this.tPrev = null;
   }
 
-  filter(landmarks) {
-    if (!landmarks || landmarks.length === 0) return null;
-    
-    if (!this.prevKeypoints || this.prevKeypoints.length !== landmarks.length) {
-      this.prevKeypoints = landmarks.map(lm => ({ ...lm }));
-      return this.prevKeypoints;
+  alpha(cutoff) {
+    const tau = 1.0 / (2 * Math.PI * cutoff);
+    const te = 1.0 / this.freq;
+    return 1.0 / (1.0 + tau / te);
+  }
+
+  filter(val, timestamp = Date.now()) {
+    if (this.tPrev === null) {
+      this.xPrev = val;
+      this.dxPrev = 0;
+      this.tPrev = timestamp;
+      return val;
     }
 
-    const smoothed = landmarks.map((lm, idx) => {
-      const prev = this.prevKeypoints[idx];
-      const filteredX = this.alpha * lm.x + (1 - this.alpha) * prev.x;
-      const filteredY = this.alpha * lm.y + (1 - this.alpha) * prev.y;
-      const filteredZ = lm.z !== undefined && prev.z !== undefined
-        ? this.alpha * lm.z + (1 - this.alpha) * prev.z
-        : lm.z;
-      const visibility = lm.visibility !== undefined ? lm.visibility : 1.0;
+    const dt = Math.max((timestamp - this.tPrev) / 1000.0, 0.001);
+    this.freq = 1.0 / dt;
+    this.tPrev = timestamp;
 
-      return { x: filteredX, y: filteredY, z: filteredZ, visibility };
-    });
+    const dx = (val - this.xPrev) / dt;
+    const edx = this.alpha(this.dCutoff) * dx + (1 - this.alpha(this.dCutoff)) * this.dxPrev;
+    this.dxPrev = edx;
 
-    this.prevKeypoints = smoothed;
-    return smoothed;
+    const cutoff = this.minCutoff + this.beta * Math.abs(edx);
+    const a = this.alpha(cutoff);
+    const xFiltered = a * val + (1 - a) * this.xPrev;
+    this.xPrev = xFiltered;
+
+    return xFiltered;
   }
 
   reset() {
-    this.prevKeypoints = null;
+    this.xPrev = null;
+    this.dxPrev = null;
+    this.tPrev = null;
   }
 }
 
 /**
- * Calculadora de Ângulos e Métricas Biomecânicas
+ * Gerenciador do Filtro 1€ para o Conjunto de Keypoints (33 landmarks do MediaPipe)
+ */
+class KeypointSpatialFilter {
+  constructor(minCutoff = 1.0, beta = 0.007) {
+    this.filtersX = [];
+    this.filtersY = [];
+    this.filtersZ = [];
+    this.minCutoff = minCutoff;
+    this.beta = beta;
+  }
+
+  initFilters(count) {
+    this.filtersX = Array.from({ length: count }, () => new OneEuroFilter(30, this.minCutoff, this.beta));
+    this.filtersY = Array.from({ length: count }, () => new OneEuroFilter(30, this.minCutoff, this.beta));
+    this.filtersZ = Array.from({ length: count }, () => new OneEuroFilter(30, this.minCutoff, this.beta));
+  }
+
+  filter(landmarks) {
+    if (!landmarks || landmarks.length === 0) return null;
+
+    if (this.filtersX.length !== landmarks.length) {
+      this.initFilters(landmarks.length);
+    }
+
+    const now = Date.now();
+    return landmarks.map((lm, idx) => {
+      if (lm.visibility !== undefined && lm.visibility < 0.4) {
+        return lm;
+      }
+
+      const fx = this.filtersX[idx].filter(lm.x, now);
+      const fy = this.filtersY[idx].filter(lm.y, now);
+      const fz = lm.z !== undefined ? this.filtersZ[idx].filter(lm.z, now) : lm.z;
+
+      return {
+        x: fx,
+        y: fy,
+        z: fz,
+        visibility: lm.visibility !== undefined ? lm.visibility : 1.0
+      };
+    });
+  }
+
+  reset() {
+    this.filtersX.forEach(f => f.reset());
+    this.filtersY.forEach(f => f.reset());
+    this.filtersZ.forEach(f => f.reset());
+  }
+}
+
+/**
+ * Calculadora Biomecânica de Ângulos (Membros Inferiores & Superiores)
  */
 class BiomechanicalEngine {
   /**
-   * Calcula o ângulo interno em graus formado pelos pontos A-B-C (Vértice em B)
+   * Ângulo interno 2D em graus formado pelos pontos A-B-C (Vértice em B)
    */
   static calculateAngle(pointA, pointB, pointC) {
     if (!pointA || !pointB || !pointC) return 0;
@@ -62,72 +128,580 @@ class BiomechanicalEngine {
   }
 
   /**
-   * Calcula a inclinação do tronco em relação à vertical (90° = vertical, < 45° = inclinado)
+   * Ângulo 3D em graus formado por A-B-C considerando eixos x, y, z
+   */
+  static calculateAngle3D(pointA, pointB, pointC) {
+    if (!pointA || !pointB || !pointC) return 0;
+
+    const vAB = { x: pointA.x - pointB.x, y: pointA.y - pointB.y, z: (pointA.z || 0) - (pointB.z || 0) };
+    const vCB = { x: pointC.x - pointB.x, y: pointC.y - pointB.y, z: (pointC.z || 0) - (pointB.z || 0) };
+
+    const dot = vAB.x * vCB.x + vAB.y * vCB.y + vAB.z * vCB.z;
+    const magAB = Math.sqrt(vAB.x * vAB.x + vAB.y * vAB.y + vAB.z * vAB.z);
+    const magCB = Math.sqrt(vCB.x * vCB.x + vCB.y * vCB.y + vCB.z * vCB.z);
+
+    if (magAB * magCB === 0) return 0;
+    let cosTheta = dot / (magAB * magCB);
+    cosTheta = Math.max(-1.0, Math.min(1.0, cosTheta));
+
+    return (Math.acos(cosTheta) * 180.0) / Math.PI;
+  }
+
+  /**
+   * Ângulo de inclinação do tronco em relação à linha vertical
    */
   static calculateTrunkInclination(shoulder, hip) {
     if (!shoulder || !hip) return 0;
-    // Vetor do tronco
     const dx = shoulder.x - hip.x;
     const dy = shoulder.y - hip.y;
-    // Ângulo com o eixo vertical gravitação
     const angleRad = Math.atan2(Math.abs(dx), Math.abs(dy));
     return (angleRad * 180.0) / Math.PI;
   }
 
   /**
+   * Ângulo de Abdução/Elevação do Ombro (braço com o tronco)
+   */
+  static calculateShoulderAbduction(hip, shoulder, elbow) {
+    if (!hip || !shoulder || !elbow) return 0;
+    return this.calculateAngle(hip, shoulder, elbow);
+  }
+
+  /**
+   * Ângulo de Flexão/Extensão do Cotovelo (ombro - cotovelo - pulso)
+   */
+  static calculateElbowFlexion(shoulder, elbow, wrist) {
+    if (!shoulder || !elbow || !wrist) return 0;
+    return this.calculateAngle(shoulder, elbow, wrist);
+  }
+
+  /**
+   * Ângulo de inclinação do braço em relação à horizontal
+   */
+  static calculateArmHorizontalAngle(shoulder, elbow) {
+    if (!shoulder || !elbow) return 0;
+    const dx = elbow.x - shoulder.x;
+    const dy = elbow.y - shoulder.y;
+    const angleRad = Math.atan2(Math.abs(dy), Math.abs(dx));
+    return (angleRad * 180.0) / Math.PI;
+  }
+
+  /**
    * Avalia colapso medial do joelho (Valgo Dinâmico)
-   * Mede a projeção horizontal do joelho em relação à linha imaginária Quadril-Tornozelo
    */
   static detectKneeValgus(hip, knee, ankle) {
     if (!hip || !knee || !ankle) return { valgusDetected: false, ratio: 0 };
-
-    // Posição X esperada no alinhamento coronal neutro (interpolação entre quadril e tornozelo)
     const expectedX = hip.x + (ankle.x - hip.x) * 0.5;
-    // Desvio medial (se o joelho esquerdo mover para a direita ou vice-versa em relação à linha central)
     const medialShift = Math.abs(knee.x - expectedX);
     const hipAnkleWidth = Math.abs(hip.x - ankle.x) || 0.1;
-
     const ratio = medialShift / hipAnkleWidth;
-    // Se o joelho colapsar medialmente mais que 25% da largura da perna
     const valgusDetected = ratio > 0.22 && (knee.y > hip.y);
-
     return { valgusDetected, ratio: parseFloat(ratio.toFixed(3)) };
   }
 
   /**
-   * Avalia elevação do calcanhar em relação ao solo base
+   * Avalia elevação do calcanhar
    */
-  static detectHeelLift(heel, ankle, baselineY) {
-    if (!heel || !ankle || baselineY === null) return false;
-    // Deslocamento vertical para cima (menor Y no canvas significa mais alto)
-    const deltaY = baselineY - heel.y;
-    return deltaY > 0.035; // Limiar de elevação significativa
+  static detectHeelLift(leftHeel, rightHeel, baselineY) {
+    if (!leftHeel || !rightHeel || baselineY === null) return false;
+    const currentY = (leftHeel.y + rightHeel.y) / 2;
+    return (baselineY - currentY) > 0.035;
   }
 }
 
 /**
- * Gerenciador de Ciclo e Estado do Agachamento Terapêutico
+ * Regulador de Distância de Câmera (Camera Calibration Engine)
  */
-class TherapeuticSquatAnalyzer {
+class CameraDistanceRegulator {
+  static evaluateDistance(landmarks) {
+    if (!landmarks || landmarks.length < 33) {
+      return { status: "WAITING", message: "Aguardando paciente no enquadramento", code: 0 };
+    }
+
+    const leftShoulder = landmarks[11];
+    const rightShoulder = landmarks[12];
+    const leftAnkle = landmarks[27];
+    const rightAnkle = landmarks[28];
+
+    if (!leftShoulder || !rightShoulder) {
+      return { status: "WAITING", message: "Procurando ombros do paciente...", code: 0 };
+    }
+
+    const dx = rightShoulder.x - leftShoulder.x;
+    const dy = rightShoulder.y - leftShoulder.y;
+    const shoulderWidth = Math.sqrt(dx * dx + dy * dy);
+
+    let bboxHeight = 0;
+    if (leftAnkle && rightAnkle) {
+      const avgShoulderY = (leftShoulder.y + rightShoulder.y) / 2;
+      const avgAnkleY = (leftAnkle.y + rightAnkle.y) / 2;
+      bboxHeight = Math.abs(avgAnkleY - avgShoulderY);
+    }
+
+    if (shoulderWidth > 0.38 || (bboxHeight > 0.85 && bboxHeight !== 0)) {
+      return {
+        status: "TOO_CLOSE",
+        message: "⚠️ MUITO PERTO! Dê 1 ou 2 passos para TRÁS.",
+        code: -1,
+        shoulderWidth: parseFloat(shoulderWidth.toFixed(3))
+      };
+    } else if (shoulderWidth < 0.14) {
+      return {
+        status: "TOO_FAR",
+        message: "⚠️ MUITO LONGE! Dê 1 ou 2 passos para FRENTE.",
+        code: 1,
+        shoulderWidth: parseFloat(shoulderWidth.toFixed(3))
+      };
+    } else {
+      return {
+        status: "IDEAL",
+        message: "🟢 ENQUADRAMENTO IDEAL! Pode iniciar o exercício.",
+        code: 2,
+        shoulderWidth: parseFloat(shoulderWidth.toFixed(3))
+      };
+    }
+  }
+}
+
+/**
+ * Isolamento de Sujeito (Target Tracking Engine)
+ */
+class SubjectTracker {
   constructor() {
-    this.spatialFilter = new KeypointSpatialFilter(0.35);
-    
-    // Contadores de Sessão
+    this.targetId = null;
+    this.targetCentroid = null;
+    this.lockActive = false;
+  }
+
+  setTarget(x, y) {
+    this.targetCentroid = { x, y };
+    this.lockActive = true;
+  }
+
+  clearTarget() {
+    this.targetId = null;
+    this.targetCentroid = null;
+    this.lockActive = false;
+  }
+
+  filterTargetPose(landmarks) {
+    if (!this.lockActive || !landmarks || landmarks.length === 0) {
+      return landmarks;
+    }
+
+    const ls = landmarks[11];
+    const rs = landmarks[12];
+    if (!ls || !rs) return landmarks;
+
+    const currentCentroid = { x: (ls.x + rs.x) / 2, y: (ls.y + rs.y) / 2 };
+
+    if (!this.targetCentroid) {
+      this.targetCentroid = currentCentroid;
+      return landmarks;
+    }
+
+    const dist = Math.hypot(currentCentroid.x - this.targetCentroid.x, currentCentroid.y - this.targetCentroid.y);
+
+    if (dist < 0.35) {
+      this.targetCentroid = currentCentroid;
+      return landmarks;
+    } else {
+      return null;
+    }
+  }
+}
+
+/**
+ * Ponte de Comunicação IoT Arduino (Web Serial API)
+ */
+class ArduinoIoTBridge {
+  constructor() {
+    this.port = null;
+    this.writer = null;
+    this.connected = false;
+    this.onStatusChange = null;
+  }
+
+  async connect() {
+    if (!("serial" in navigator)) {
+      throw new Error("Web Serial API não é suportada por este navegador. Use o Google Chrome ou Microsoft Edge.");
+    }
+
+    try {
+      this.port = await navigator.serial.requestPort();
+      await this.port.open({ baudRate: 115200 });
+      
+      const textEncoder = new TextEncoderStream();
+      textEncoder.readable.pipeTo(this.port.writable);
+      this.writer = textEncoder.writable.getWriter();
+
+      this.connected = true;
+      if (this.onStatusChange) this.onStatusChange(true, "Arduino Conectado (115200 Baud)");
+      return true;
+    } catch (err) {
+      this.connected = false;
+      if (this.onStatusChange) this.onStatusChange(false, `Falha IoT: ${err.message}`);
+      throw err;
+    }
+  }
+
+  async sendFeedback(status, rgbArray = [0, 255, 0], repCount = 0, angle = 0) {
+    if (!this.connected || !this.writer) return;
+
+    const payload = JSON.stringify({
+      cmd: "FEEDBACK",
+      status,
+      rep: repCount,
+      angle: Math.round(angle),
+      rgb: rgbArray
+    }) + "\n";
+
+    try {
+      await this.writer.write(payload);
+    } catch (e) {
+      console.warn("Erro no envio de dados IoT Arduino:", e);
+    }
+  }
+
+  async disconnect() {
+    if (this.writer) {
+      await this.writer.close();
+      this.writer = null;
+    }
+    if (this.port) {
+      await this.port.close();
+      this.port = null;
+    }
+    this.connected = false;
+    if (this.onStatusChange) this.onStatusChange(false, "Arduino Desconectado");
+  }
+}
+
+/**
+ * Catálogo de Exercícios Fisioterapêuticos Modulares
+ */
+const ExerciseLibrary = {
+  squat: {
+    id: "squat",
+    category: "Membros Inferiores",
+    name: "Agachamento Terapêutico (Squat)",
+    targetJointName: "Flexão Joelhos",
+    unit: "deg",
+    targetRange: "80.0° a 90.0°",
+    evaluate: (landmarks, engineState) => {
+      const leftHip = landmarks[23];
+      const rightHip = landmarks[24];
+      const leftKnee = landmarks[25];
+      const rightKnee = landmarks[26];
+      const leftAnkle = landmarks[27];
+      const rightAnkle = landmarks[28];
+      const leftShoulder = landmarks[11];
+      const rightShoulder = landmarks[12];
+      const leftHeel = landmarks[29];
+      const rightHeel = landmarks[30];
+
+      const leftKneeAngle = BiomechanicalEngine.calculateAngle(leftHip, leftKnee, leftAnkle);
+      const rightKneeAngle = BiomechanicalEngine.calculateAngle(rightHip, rightKnee, rightAnkle);
+      const mainAngle = (leftKneeAngle + rightKneeAngle) / 2;
+
+      const leftTrunk = BiomechanicalEngine.calculateTrunkInclination(leftShoulder, leftHip);
+      const rightTrunk = BiomechanicalEngine.calculateTrunkInclination(rightShoulder, rightHip);
+      const trunkAngle = (leftTrunk + rightTrunk) / 2;
+
+      const leftValgus = BiomechanicalEngine.detectKneeValgus(leftHip, leftKnee, leftAnkle);
+      const rightValgus = BiomechanicalEngine.detectKneeValgus(rightHip, rightKnee, rightAnkle);
+      const valgoDinamico = leftValgus.valgusDetected || rightValgus.valgusDetected;
+      const troncoExcessivo = trunkAngle > 45.0;
+      const calcanharElevado = BiomechanicalEngine.detectHeelLift(leftHeel, rightHeel, engineState.groundBaselineY);
+
+      let phase = engineState.currentState;
+      let repCompleted = false;
+      let isCorrectRep = false;
+
+      if (phase === "standing" && mainAngle < 155.0) {
+        phase = "eccentric";
+        engineState.resetRepFaults();
+      } else if (phase === "eccentric") {
+        if (mainAngle <= 92.0 && mainAngle >= 78.0) {
+          phase = "bottom_hold";
+        } else if (mainAngle > 160.0) {
+          phase = "standing";
+        }
+      } else if (phase === "bottom_hold" && mainAngle > 95.0) {
+        phase = "concentric";
+      } else if (phase === "concentric" && mainAngle >= 165.0) {
+        repCompleted = true;
+        isCorrectRep = !engineState.hasFaultInCurrentRep;
+        phase = "standing";
+      }
+
+      if (valgoDinamico || troncoExcessivo || calcanharElevado) {
+        engineState.hasFaultInCurrentRep = true;
+      }
+
+      let status = "EXCELENTE";
+      let feedback = "Excelente postura! Mantenha os joelhos alinhados.";
+      let rgb = [0, 255, 0];
+
+      if (valgoDinamico) {
+        status = "CORRIGIR";
+        feedback = "⚠️ ALERTA: Mantenha os joelhos para fora! Não deixe colapsar.";
+        rgb = [255, 0, 0];
+      } else if (troncoExcessivo) {
+        status = "ATENÇÃO";
+        feedback = "⚠️ Mantenha o peito aberto. Tronco muito inclinado.";
+        rgb = [255, 165, 0];
+      } else if (calcanharElevado) {
+        status = "ATENÇÃO";
+        feedback = "⚠️ Mantenha os calcanhares firmes no chão.";
+        rgb = [255, 165, 0];
+      }
+
+      return {
+        mainAngle,
+        secondaryAngle: trunkAngle,
+        phase,
+        repCompleted,
+        isCorrectRep,
+        status,
+        feedback,
+        rgb,
+        faults: { valgoDinamico, troncoExcessivo, calcanharElevado }
+      };
+    }
+  },
+
+  shoulder_abduction: {
+    id: "shoulder_abduction",
+    category: "Membros Superiores",
+    name: "Abdução de Ombro (Elevação Lateral)",
+    targetJointName: "Abdução Ombro",
+    unit: "deg",
+    targetRange: "85.0° a 95.0°",
+    evaluate: (landmarks, engineState) => {
+      const leftShoulder = landmarks[11];
+      const rightShoulder = landmarks[12];
+      const leftElbow = landmarks[13];
+      const rightElbow = landmarks[14];
+      const leftHip = landmarks[23];
+      const rightHip = landmarks[24];
+
+      const leftAngle = BiomechanicalEngine.calculateShoulderAbduction(leftHip, leftShoulder, leftElbow);
+      const rightAngle = BiomechanicalEngine.calculateShoulderAbduction(rightHip, rightShoulder, rightElbow);
+      const mainAngle = Math.max(leftAngle, rightAngle);
+
+      const trunkAngle = (BiomechanicalEngine.calculateTrunkInclination(leftShoulder, leftHip) + 
+                          BiomechanicalEngine.calculateTrunkInclination(rightShoulder, rightHip)) / 2;
+
+      const troncoInclinado = trunkAngle > 15.0;
+      const hiperabducao = mainAngle > 105.0;
+
+      let phase = engineState.currentState;
+      let repCompleted = false;
+      let isCorrectRep = false;
+
+      if (phase === "standing" && mainAngle > 30.0) {
+        phase = "eccentric";
+        engineState.resetRepFaults();
+      } else if (phase === "eccentric" && mainAngle >= 85.0) {
+        phase = "bottom_hold";
+      } else if (phase === "bottom_hold" && mainAngle < 80.0) {
+        phase = "concentric";
+      } else if (phase === "concentric" && mainAngle <= 25.0) {
+        repCompleted = true;
+        isCorrectRep = !engineState.hasFaultInCurrentRep;
+        phase = "standing";
+      }
+
+      if (troncoInclinado || hiperabducao) engineState.hasFaultInCurrentRep = true;
+
+      let status = "EXCELENTE";
+      let feedback = "Elevação lateral sob controle! Alvo 90°.";
+      let rgb = [0, 255, 0];
+
+      if (hiperabducao) {
+        status = "CORRIGIR";
+        feedback = "⚠️ Cuidado! Não eleve o braço acima da linha dos ombros (> 95°).";
+        rgb = [255, 0, 0];
+      } else if (troncoInclinado) {
+        status = "ATENÇÃO";
+        feedback = "⚠️ Evite balançar o corpo para subir o peso. Mantenha o tronco firme.";
+        rgb = [255, 165, 0];
+      }
+
+      return {
+        mainAngle,
+        secondaryAngle: trunkAngle,
+        phase,
+        repCompleted,
+        isCorrectRep,
+        status,
+        feedback,
+        rgb,
+        faults: { hiperabducao, troncoInclinado }
+      };
+    }
+  },
+
+  biceps_curl: {
+    id: "biceps_curl",
+    category: "Membros Superiores",
+    name: "Rosca Direta de Bíceps",
+    targetJointName: "Flexão Cotovelo",
+    unit: "deg",
+    targetRange: "35.0° a 50.0°",
+    evaluate: (landmarks, engineState) => {
+      const leftShoulder = landmarks[11];
+      const rightShoulder = landmarks[12];
+      const leftElbow = landmarks[13];
+      const rightElbow = landmarks[14];
+      const leftWrist = landmarks[15];
+      const rightWrist = landmarks[16];
+
+      const leftElbowAngle = BiomechanicalEngine.calculateElbowFlexion(leftShoulder, leftElbow, leftWrist);
+      const rightElbowAngle = BiomechanicalEngine.calculateElbowFlexion(rightShoulder, rightElbow, rightWrist);
+      const mainAngle = Math.min(leftElbowAngle, rightElbowAngle);
+
+      const elbowDisplacement = Math.abs(leftElbow.x - leftShoulder.x);
+      const cotoveloProjetado = elbowDisplacement > 0.12;
+
+      let phase = engineState.currentState;
+      let repCompleted = false;
+      let isCorrectRep = false;
+
+      if (phase === "standing" && mainAngle < 140.0) {
+        phase = "eccentric";
+        engineState.resetRepFaults();
+      } else if (phase === "eccentric" && mainAngle <= 50.0) {
+        phase = "bottom_hold";
+      } else if (phase === "bottom_hold" && mainAngle > 60.0) {
+        phase = "concentric";
+      } else if (phase === "concentric" && mainAngle >= 150.0) {
+        repCompleted = true;
+        isCorrectRep = !engineState.hasFaultInCurrentRep;
+        phase = "standing";
+      }
+
+      if (cotoveloProjetado) engineState.hasFaultInCurrentRep = true;
+
+      let status = "EXCELENTE";
+      let feedback = "Movimento limpo! Contraia o bíceps no topo.";
+      let rgb = [0, 255, 0];
+
+      if (cotoveloProjetado) {
+        status = "ATENÇÃO";
+        feedback = "⚠️ Mantenha os cotovelos fixos ao lado do tronco! Não os jogue para frente.";
+        rgb = [255, 165, 0];
+      }
+
+      return {
+        mainAngle,
+        secondaryAngle: elbowDisplacement * 100,
+        phase,
+        repCompleted,
+        isCorrectRep,
+        status,
+        feedback,
+        rgb,
+        faults: { cotoveloProjetado }
+      };
+    }
+  },
+
+  triceps_extension: {
+    id: "triceps_extension",
+    category: "Membros Superiores",
+    name: "Extensão de Tríceps (Coice)",
+    targetJointName: "Extensão Cotovelo",
+    unit: "deg",
+    targetRange: "165.0° a 180.0°",
+    evaluate: (landmarks, engineState) => {
+      const leftShoulder = landmarks[11];
+      const rightShoulder = landmarks[12];
+      const leftElbow = landmarks[13];
+      const rightElbow = landmarks[14];
+      const leftWrist = landmarks[15];
+      const rightWrist = landmarks[16];
+
+      const leftElbowAngle = BiomechanicalEngine.calculateElbowFlexion(leftShoulder, leftElbow, leftWrist);
+      const rightElbowAngle = BiomechanicalEngine.calculateElbowFlexion(rightShoulder, rightElbow, rightWrist);
+      const mainAngle = Math.max(leftElbowAngle, rightElbowAngle);
+
+      const armAngle = BiomechanicalEngine.calculateArmHorizontalAngle(leftShoulder, leftElbow);
+      const bracoQueda = armAngle > 30.0;
+
+      let phase = engineState.currentState;
+      let repCompleted = false;
+      let isCorrectRep = false;
+
+      if (phase === "standing" && mainAngle > 110.0) {
+        phase = "eccentric";
+        engineState.resetRepFaults();
+      } else if (phase === "eccentric" && mainAngle >= 165.0) {
+        phase = "bottom_hold";
+      } else if (phase === "bottom_hold" && mainAngle < 155.0) {
+        phase = "concentric";
+      } else if (phase === "concentric" && mainAngle <= 95.0) {
+        repCompleted = true;
+        isCorrectRep = !engineState.hasFaultInCurrentRep;
+        phase = "standing";
+      }
+
+      if (bracoQueda) engineState.hasFaultInCurrentRep = true;
+
+      let status = "EXCELENTE";
+      let feedback = "Extensão completa do tríceps! Excelente trava.";
+      let rgb = [0, 255, 0];
+
+      if (bracoQueda) {
+        status = "ATENÇÃO";
+        feedback = "⚠️ Mantenha o braço alinhado em paralelo ao solo. Não deixe o cotovelo cair.";
+        rgb = [255, 165, 0];
+      }
+
+      return {
+        mainAngle,
+        secondaryAngle: armAngle,
+        phase,
+        repCompleted,
+        isCorrectRep,
+        status,
+        feedback,
+        rgb,
+        faults: { bracoQueda }
+      };
+    }
+  }
+};
+
+/**
+ * Motor Unificado de Análise Fisioterapêutica (TherapeuticExerciseAnalyzer)
+ */
+class TherapeuticExerciseAnalyzer {
+  constructor(exerciseId = "squat") {
+    this.spatialFilter = new KeypointSpatialFilter(1.0, 0.007);
+    this.subjectTracker = new SubjectTracker();
+    this.iotBridge = new ArduinoIoTBridge();
+
+    this.currentExerciseKey = exerciseId;
     this.totalReps = 0;
     this.correctReps = 0;
     this.faultReps = 0;
     this.frameCounter = 0;
-    this.sessionHistory = [];
 
-    // Maquina de Estados
-    this.currentState = "standing"; // standing -> eccentric -> bottom_hold -> concentric -> standing
-    this.minKneeAngleInRep = 180;
-    this.valgusInCurrentRep = false;
-    this.trunkFaultInCurrentRep = false;
-    this.heelFaultInCurrentRep = false;
-
-    // Linha Base do Solo (Registrado em posição neutra)
+    this.currentState = "standing";
+    this.hasFaultInCurrentRep = false;
     this.groundBaselineY = null;
+  }
+
+  setExercise(exerciseId) {
+    if (ExerciseLibrary[exerciseId]) {
+      this.currentExerciseKey = exerciseId;
+      this.resetSession();
+    }
+  }
+
+  resetRepFaults() {
+    this.hasFaultInCurrentRep = false;
   }
 
   resetSession() {
@@ -135,107 +709,68 @@ class TherapeuticSquatAnalyzer {
     this.correctReps = 0;
     this.faultReps = 0;
     this.frameCounter = 0;
-    this.sessionHistory = [];
     this.currentState = "standing";
-    this.minKneeAngleInRep = 180;
-    this.valgusInCurrentRep = false;
-    this.trunkFaultInCurrentRep = false;
-    this.heelFaultInCurrentRep = false;
+    this.hasFaultInCurrentRep = false;
     this.groundBaselineY = null;
+    this.spatialFilter.reset();
   }
 
-  /**
-   * Processa o frame de keypoints recebido da Interface de Captação
-   */
   processFrame(rawLandmarks, useFilter = true) {
     this.frameCounter++;
     const timestamp = Date.now();
 
-    // 1. Filtragem Espacial e Suavização de Ruído Local
-    const landmarks = useFilter ? this.spatialFilter.filter(rawLandmarks) : rawLandmarks;
+    // 1. Isolamento de Sujeito (Target Tracking)
+    const trackedLandmarks = this.subjectTracker.filterTargetPose(rawLandmarks);
+    if (!trackedLandmarks) {
+      return this.buildOutputData(timestamp, "Aguardando paciente foco no enquadramento...", null, null);
+    }
+
+    // 2. Filtragem 1€ (One Euro Filter)
+    const landmarks = useFilter ? this.spatialFilter.filter(trackedLandmarks) : trackedLandmarks;
 
     if (!landmarks || landmarks.length < 33) {
-      return this.buildOutputJSON(timestamp, "Aguardando detecção completa de keypoints...", null);
+      return this.buildOutputData(timestamp, "Aguardando detecção completa de keypoints...", null, null);
     }
 
-    // Indexação dos Landmarks MediaPipe Pose
-    const leftShoulder = landmarks[11];
-    const rightShoulder = landmarks[12];
-    const leftHip = landmarks[23];
-    const rightHip = landmarks[24];
-    const leftKnee = landmarks[25];
-    const rightKnee = landmarks[26];
-    const leftAnkle = landmarks[27];
-    const rightAnkle = landmarks[28];
-    const leftHeel = landmarks[29];
-    const rightHeel = landmarks[30];
+    // 3. Avaliação de Regulagem de Distância da Câmera
+    const distanceEval = CameraDistanceRegulator.evaluateDistance(landmarks);
 
-    // Registro do Solo Baseline (posição do calcanhar quando em pé)
-    if (this.groundBaselineY === null && leftHeel && rightHeel) {
-      this.groundBaselineY = (leftHeel.y + rightHeel.y) / 2;
+    // Baseline Solo
+    if (this.groundBaselineY === null && landmarks[29] && landmarks[30]) {
+      this.groundBaselineY = (landmarks[29].y + landmarks[30].y) / 2;
     }
 
-    // 2. Cálculos Angulares Biomecânicos
-    const leftKneeAngle = BiomechanicalEngine.calculateAngle(leftHip, leftKnee, leftAnkle);
-    const rightKneeAngle = BiomechanicalEngine.calculateAngle(rightHip, rightKnee, rightAnkle);
-    const avgKneeAngle = (leftKneeAngle + rightKneeAngle) / 2;
+    // 4. Seleção da Estratégia de Exercício
+    const exerciseConfig = ExerciseLibrary[this.currentExerciseKey] || ExerciseLibrary.squat;
+    const result = exerciseConfig.evaluate(landmarks, this);
 
-    const leftTrunkAngle = BiomechanicalEngine.calculateTrunkInclination(leftShoulder, leftHip);
-    const rightTrunkAngle = BiomechanicalEngine.calculateTrunkInclination(rightShoulder, rightHip);
-    const avgTrunkAngle = (leftTrunkAngle + rightTrunkAngle) / 2;
+    this.currentState = result.phase;
 
-    // 3. Avaliação de Compensações & Falhas Graves
-    const leftValgus = BiomechanicalEngine.detectKneeValgus(leftHip, leftKnee, leftAnkle);
-    const rightValgus = BiomechanicalEngine.detectKneeValgus(rightHip, rightKnee, rightAnkle);
-    const valgoDinamico = leftValgus.valgusDetected || rightValgus.valgusDetected;
-
-    const troncoExcessivo = avgTrunkAngle > 45.0; // Tronco inclinado além do limite seguro
-    const calcanharElevado = BiomechanicalEngine.detectHeelLift(leftHeel, rightHeel, this.groundBaselineY);
-
-    // Registra falhas na repetição corrente
-    if (valgoDinamico) this.valgusInCurrentRep = true;
-    if (troncoExcessivo) this.trunkFaultInCurrentRep = true;
-    if (calcanharElevado) this.heelFaultInCurrentRep = true;
-
-    if (avgKneeAngle < this.minKneeAngleInRep) {
-      this.minKneeAngleInRep = avgKneeAngle;
-    }
-
-    // 4. Máquina de Estados do Movimento
-    this.updateMovementState(avgKneeAngle);
-
-    // 5. Avaliação do Status & Mensagem de Feedback para o Paciente
-    let statusQualidade = "EXCELENTE";
-    let mensagemFeedback = "Excelente postura! Mantenha os joelhos alinhados.";
-    let scoreFrame = 100.0;
-
-    if (valgoDinamico) {
-      statusQualidade = "CORRIGIR";
-      mensagemFeedback = "⚠️ ALERTA: Mantenha os joelhos projetados para fora! Não os deixe colapsar para dentro.";
-      scoreFrame -= 40.0;
-    } else if (troncoExcessivo) {
-      statusQualidade = "ATENÇÃO";
-      mensagemFeedback = "⚠️ Mantenha o peito aberto e a coluna alinhada. Tronco muito inclinado à frente.";
-      scoreFrame -= 30.0;
-    } else if (calcanharElevado) {
-      statusQualidade = "ATENÇÃO";
-      mensagemFeedback = "⚠️ Mantenha os calcanhares firmes no chão! Não os levante.";
-      scoreFrame -= 25.0;
-    } else if (this.currentState === "eccentric") {
-      if (avgKneeAngle > 100) {
-        mensagemFeedback = "Continue agachando até atingir flexão entre 80° e 90°.";
-      } else if (avgKneeAngle >= 80 && avgKneeAngle <= 90) {
-        mensagemFeedback = "🎯 Perfeito! Amplitude ideal atingida (80° - 90°). Agora inicie a subida.";
+    if (result.repCompleted) {
+      this.totalReps++;
+      if (result.isCorrectRep) {
+        this.correctReps++;
+      } else {
+        this.faultReps++;
       }
-    } else if (this.currentState === "bottom_hold") {
-      mensagemFeedback = "Ponto crítico atingido! Mantenha a estabilidade e suba de forma controlada.";
+      if (this.iotBridge.connected) {
+        this.iotBridge.sendFeedback(
+          result.isCorrectRep ? "CORRECT" : "FAULT",
+          result.rgb,
+          this.totalReps,
+          result.mainAngle
+        );
+      }
     }
 
-    // Formata objeto de métricas
-    const metricsData = {
+    return {
       timestamp,
       frameId: this.frameCounter,
-      exercicio: "Agachamento Terapêutico (Squat)",
+      exercicio: exerciseConfig.name,
+      exerciseKey: this.currentExerciseKey,
+      targetJointName: exerciseConfig.targetJointName,
+      unit: exerciseConfig.unit,
+      targetRange: exerciseConfig.targetRange,
       faseMovimento: this.currentState,
       repeticoes: {
         completas: this.totalReps,
@@ -243,168 +778,76 @@ class TherapeuticSquatAnalyzer {
         comCompensacao: this.faultReps
       },
       angulosAtuais: {
-        joelhoEsquerdoDeg: parseFloat(leftKneeAngle.toFixed(1)),
-        joelhoDireitoDeg: parseFloat(rightKneeAngle.toFixed(1)),
-        joelhoMedioDeg: parseFloat(avgKneeAngle.toFixed(1)),
-        troncoInclinacaoDeg: parseFloat(avgTrunkAngle.toFixed(1)),
-        simetriaQuadrilPct: 98.5
-      },
-      posturaBase: {
-        afastamentoPesAdequado: true,
-        colunaAlinhada: !troncoExcessivo
-      },
-      falhasDetectadas: {
-        valgoDinamico,
-        troncoExcessivo,
-        calcanharElevado
+        principalDeg: parseFloat(result.mainAngle.toFixed(1)),
+        secundarioDeg: parseFloat(result.secondaryAngle.toFixed(1))
       },
       qualidadeExecucao: {
-        pontuacaoFrame: Math.max(0, parseFloat(scoreFrame.toFixed(1))),
-        status: statusQualidade,
-        mensagemFeedback
+        status: result.status,
+        mensagemFeedback: result.feedback
       },
+      distanceEval,
       landmarksProcessed: landmarks
     };
-
-    return metricsData;
   }
 
-  /**
-   * Atualiza a transição de fases do agachamento
-   */
-  updateMovementState(avgKneeAngle) {
-    switch (this.currentState) {
-      case "standing":
-        if (avgKneeAngle < 155.0) {
-          this.currentState = "eccentric";
-          this.minKneeAngleInRep = avgKneeAngle;
-          this.valgusInCurrentRep = false;
-          this.trunkFaultInCurrentRep = false;
-          this.heelFaultInCurrentRep = false;
-        }
-        break;
-
-      case "eccentric":
-        if (avgKneeAngle <= 92.0 && avgKneeAngle >= 78.0) {
-          this.currentState = "bottom_hold";
-        } else if (avgKneeAngle > 160.0) {
-          // Abortou a descida prematuramente
-          this.currentState = "standing";
-        }
-        break;
-
-      case "bottom_hold":
-        if (avgKneeAngle > 95.0) {
-          this.currentState = "concentric";
-        }
-        break;
-
-      case "concentric":
-        if (avgKneeAngle >= 165.0) {
-          // Repetição Concluída!
-          this.totalReps++;
-          const targetDepthReached = this.minKneeAngleInRep <= 92.0 && this.minKneeAngleInRep >= 75.0;
-          const hadFaults = this.valgusInCurrentRep || this.trunkFaultInCurrentRep || this.heelFaultInCurrentRep;
-
-          if (targetDepthReached && !hadFaults) {
-            this.correctReps++;
-          } else {
-            this.faultReps++;
-          }
-
-          this.currentState = "standing";
-        }
-        break;
-    }
+  buildOutputData(timestamp, msg, landmarks, distanceEval) {
+    const exerciseConfig = ExerciseLibrary[this.currentExerciseKey] || ExerciseLibrary.squat;
+    return {
+      timestamp,
+      frameId: this.frameCounter,
+      exercicio: exerciseConfig.name,
+      exerciseKey: this.currentExerciseKey,
+      targetJointName: exerciseConfig.targetJointName,
+      unit: exerciseConfig.unit,
+      targetRange: exerciseConfig.targetRange,
+      faseMovimento: "Aguardando",
+      repeticoes: { completas: this.totalReps, corretas: this.correctReps, comCompensacao: this.faultReps },
+      angulosAtuais: { principalDeg: 0, secundarioDeg: 0 },
+      qualidadeExecucao: { status: "ATENÇÃO", mensagemFeedback: msg },
+      distanceEval: distanceEval || { status: "WAITING", message: msg, code: 0 },
+      landmarksProcessed: landmarks
+    };
   }
 
-  /**
-   * Formata e retorna a stream JSON exatamente no esquema do Protocolo de Resposta do usuário
-   */
-  formatJSONProtocol(data, cameraName = "Câmera Mobile 1 - Vista Frontal") {
+  formatJSONProtocol(data, cameraName = "Câmera BioPhysio IoT - Vista Frontal") {
     if (!data || !data.angulosAtuais) {
       return JSON.stringify({
         status_execucao: "Ajuste Necessário",
-        feedback_paciente: "Aguardando posicionamento em frente à câmera...",
-        diagnostico_tecnico: "Aguardando detecção completa de keypoints articulares.",
-        dados_camera_ativa: cameraName,
-        alerta_seguranca: "Amarelo (Atenção postural)"
+        feedback_paciente: "Aguardando enquadramento...",
+        dados_camera_ativa: cameraName
       }, null, 2);
     }
 
-    const { valgoDinamico, troncoExcessivo, calcanharElevado } = data.falhasDetectadas;
-    const { joelhoEsquerdoDeg, joelhoDireitoDeg, joelhoMedioDeg, troncoInclinacaoDeg } = data.angulosAtuais;
-
-    // 1. Mapeamento de status_execucao
-    let statusExecucao = "Correto";
-    if (valgoDinamico) {
-      statusExecucao = "Incorreto";
-    } else if (troncoExcessivo || calcanharElevado) {
-      statusExecucao = "Ajuste Necessário";
-    }
-
-    // 2. Mapeamento de alerta_seguranca
-    let alertaSeguranca = "Verde (Seguro)";
-    if (valgoDinamico) {
-      alertaSeguranca = "Vermelho (Interromper - Risco de lesão iminente)";
-    } else if (troncoExcessivo || calcanharElevado) {
-      alertaSeguranca = "Amarelo (Atenção postural)";
-    }
-
-    // 3. Mapeamento de feedback_paciente (Curto e direto para voz/painel)
-    let feedbackPaciente = "Ótima postura! Mantenha a amplitude.";
-    if (valgoDinamico) {
-      feedbackPaciente = "Mantenha os joelhos para fora! Não os deixe colapsar.";
-    } else if (troncoExcessivo) {
-      feedbackPaciente = "Mantenha o peito aberto e tronco ereto.";
-    } else if (calcanharElevado) {
-      feedbackPaciente = "Mantenha os calcanhares firmes no chão.";
-    } else if (joelhoMedioDeg >= 80 && joelhoMedioDeg <= 90) {
-      feedbackPaciente = "Ótima amplitude atingida!";
-    }
-
-    // 4. Mapeamento de diagnostico_tecnico (Descrição técnica articular)
-    let diagnosticos = [];
-    if (valgoDinamico) {
-      diagnosticos.push(`Valgo dinâmico detectado nos joelhos (Ângulo médio: ${joelhoMedioDeg.toFixed(1)}°, desvio medial > 22% em relação ao eixo quadril-tornozelo).`);
-    }
-    if (troncoExcessivo) {
-      diagnosticos.push(`Inclinação frontal excessiva do tronco (${troncoInclinacaoDeg.toFixed(1)}° > limite seguro de 45.0°).`);
-    }
-    if (calcanharElevado) {
-      diagnosticos.push(`Elevação excessiva dos calcanhares em relação à linha base do solo registrada.`);
-    }
-    if (diagnosticos.length === 0) {
-      diagnosticos.push(`Execução sem falhas detectadas. Flexão dos joelhos: ${joelhoMedioDeg.toFixed(1)}° (Esquerdo: ${joelhoEsquerdoDeg.toFixed(1)}°, Direito: ${joelhoDireitoDeg.toFixed(1)}°).`);
-    }
-
-    const diagnosticoTecnico = diagnosticos.join(" ");
-
     return JSON.stringify({
-      status_execucao: statusExecucao,
-      feedback_paciente: feedbackPaciente,
-      diagnostico_tecnico: diagnosticoTecnico,
+      status_execucao: data.qualidadeExecucao.status === "EXCELENTE" ? "Correto" : "Incorreto",
+      feedback_paciente: data.qualidadeExecucao.mensagemFeedback,
+      distancia_camera: data.distanceEval ? data.distanceEval.message : "Desconhecida",
       dados_camera_ativa: cameraName,
-      alerta_seguranca: alertaSeguranca,
       telemetria_detalhada: {
         timestamp_ms: data.timestamp,
         frame_id: data.frameId,
         exercicio: data.exercicio,
         fase_movimento: data.faseMovimento,
-        repeticoes: {
-          completas: data.repeticoes.completas,
-          corretas: data.repeticoes.corretas,
-          com_compensacao: data.repeticoes.comCompensacao
-        },
-        angulos_atuais: {
-          joelho_esquerdo_deg: joelhoEsquerdoDeg,
-          joelho_direito_deg: joelhoDireitoDeg,
-          tronco_inclinacao_deg: troncoInclinacaoDeg
-        }
+        repeticoes: data.repeticoes,
+        angulo_principal_deg: data.angulosAtuais.principalDeg
       }
     }, null, 2);
   }
 }
 
+class TherapeuticSquatAnalyzer extends TherapeuticExerciseAnalyzer {
+  constructor() {
+    super("squat");
+  }
+}
+
+window.OneEuroFilter = OneEuroFilter;
+window.KeypointSpatialFilter = KeypointSpatialFilter;
 window.BiomechanicalEngine = BiomechanicalEngine;
+window.CameraDistanceRegulator = CameraDistanceRegulator;
+window.SubjectTracker = SubjectTracker;
+window.ArduinoIoTBridge = ArduinoIoTBridge;
+window.ExerciseLibrary = ExerciseLibrary;
+window.TherapeuticExerciseAnalyzer = TherapeuticExerciseAnalyzer;
 window.TherapeuticSquatAnalyzer = TherapeuticSquatAnalyzer;
+
