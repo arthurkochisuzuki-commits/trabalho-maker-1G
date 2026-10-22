@@ -2,7 +2,7 @@ $listener = New-Object System.Net.HttpListener
 $listener.Prefixes.Add("http://localhost:8080/")
 $listener.Start()
 Write-Host "Server started at http://localhost:8080/"
-$baseDir = "c:\Users\Usuário\OneDrive\Documentos\trabalho maker"
+$baseDir = $PSScriptRoot
 
 try {
     while ($listener.IsListening) {

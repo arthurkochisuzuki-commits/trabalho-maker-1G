@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BioPhysio AI - Motor de Análise Biomecânica em Tempo Real</title>
+  <meta name="description" content="Sistema portátil de análise biomecânica de movimentos fisioterapêuticos em tempo real com Visão Computacional.">
+  
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet">
+  
+  <!-- Lucide Icons (CDN) -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  
+  <!-- MediaPipe Pose CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+  
+  <!-- Stylesheets -->
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-container">
+    
+    <!-- Top Navigation Bar -->
+    <header class="navbar">
+      <div class="brand">
+        <div class="brand-icon">
+          <i data-lucide="activity"></i>
+        </div>
+        <div class="brand-text">
+          <h1>BioPhysio <span>AI Engine</span></h1>
+          <p>Análise Biomecânica Portátil & Protocolo JSON em Tempo Real</p>
+        </div>
+      </div>
+      
+      <div class="navbar-actions">
+        <div class="status-badge" id="system-status">
+          <span class="pulse-dot green"></span>
+          <span id="status-text">Motor Conectado (30 FPS)</span>
+        </div>
+
+        <button id="btn-connect-arduino" class="btn btn-sm btn-outline" title="Conectar ao Arduino via Web Serial (IoT)">
+          <i data-lucide="cpu"></i> Conectar Arduino (IoT)
+        </button>
+
+        <button id="btn-toggle-voice" class="btn-icon active" title="Ativar/Desativar Sintetizador de Voz">
+          <i data-lucide="volume-2"></i>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Workspace Grid -->
+    <main class="workspace-grid">
+      
+      <!-- LEFT PANEL: Capture & Camera Overlay Viewport -->
+      <section class="viewport-card">
+        <div class="card-header">
+          <div class="card-title">
+            <i data-lucide="camera"></i>
+            <h2>Interface de Captação & Exercício</h2>
+          </div>
+
+          <div class="selector-group" style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+            <select id="exercise-select" class="select-input" style="font-weight: 600; border-color: var(--color-primary);">
+              <optgroup label="Membros Inferiores">
+                <option value="squat">🏋️ Agachamento Terapêutico</option>
+              </optgroup>
+              <optgroup label="Membros Superiores (Fase 2)">
+                <option value="shoulder_abduction">🦾 Abdução de Ombro (Elevação)</option>
+                <option value="biceps_curl">💪 Rosca Direta de Bíceps</option>
+                <option value="triceps_extension">💥 Extensão de Tríceps (Coice)</option>
+              </optgroup>
+            </select>
+
+            <select id="input-source-select" class="select-input">
+              <option value="simulated">⚡ Simulador Sintético (Demonstração 3D)</option>
+              <option value="webcam">📷 Câmera ao Vivo (Webcam)</option>
+              <option value="video">📁 Carregar Arquivo de Vídeo</option>
+            </select>
+
+            <select id="camera-device-select" class="select-input hidden" style="border-color: var(--color-success); font-weight: 500;">
+              <option value="">🔍 Procurando Câmeras...</option>
+            </select>
+
+            <button id="btn-scan-cameras" class="btn btn-sm btn-outline" title="Localizar e listar câmeras presentes neste computador/dispositivo">
+              <i data-lucide="video"></i> Detectar Câmeras
+            </button>
+
+            <input type="file" id="video-file-input" accept="video/*" style="display: none;">
+          </div>
+        </div>
+
+        <!-- Video & HUD Overlay Canvas Viewport -->
+        <div class="canvas-wrapper" id="canvas-wrapper">
+          <video id="input-video" playsinline muted style="display: none;"></video>
+          <canvas id="output-canvas"></canvas>
+          
+          <!-- Camera Distance Calibration Toast -->
+          <div class="canvas-distance-toast" id="canvas-distance-toast">
+            <i data-lucide="ruler"></i>
+            <span id="canvas-distance-msg">Verificando enquadramento...</span>
+          </div>
+
+          <!-- Subject Tracker Lock Badge -->
+          <div class="canvas-lock-badge hidden" id="canvas-lock-badge">
+            <i data-lucide="user-check"></i>
+            <span>Paciente Alvo Travado</span>
+            <button id="btn-unlock-subject" title="Desdestravar paciente alvo">×</button>
+          </div>
+
+          <!-- Floating Status Overlay -->
+          <div class="hud-phase-overlay" id="hud-phase-overlay">
+            <span class="hud-label">FASE ATUAL</span>
+            <span class="hud-phase-val" id="hud-phase-text">EM PÉ (NEUTRO)</span>
+          </div>
+
+          <!-- Angle Quick Badge -->
+          <div class="hud-angle-badge" id="hud-angle-badge">
+            <span class="angle-val" id="hud-knee-angle">175°</span>
+            <span class="angle-sub" id="hud-angle-sub">Ângulo Alvo</span>
+          </div>
+
+          <!-- Dynamic Warning Toast on Canvas -->
+          <div class="canvas-warning-toast hidden" id="canvas-warning-toast">
+            <i data-lucide="alert-triangle"></i>
+            <span id="canvas-warning-msg">Compensação Postural Detectada!</span>
+          </div>
+
+          <!-- Camera Error / Permission Banner -->
+          <div id="camera-error-banner" class="camera-error-banner hidden">
+            <i data-lucide="camera-off"></i>
+            <div class="camera-error-content">
+              <strong id="camera-error-title">Câmera Não Conectada</strong>
+              <p id="camera-error-msg">Não foi possível acessar a câmera do computador. Verifique as permissões do seu navegador.</p>
+            </div>
+            <div class="camera-error-actions" style="display: flex; gap: 0.5rem;">
+              <button id="btn-retry-camera" class="btn btn-sm btn-primary">
+                <i data-lucide="refresh-cw"></i> Tentar Novamente
+              </button>
+              <button id="btn-scan-cameras-error" class="btn btn-sm btn-outline" style="background: rgba(255,255,255,0.1); border-color: #fff; color: #fff;">
+                <i data-lucide="video"></i> Detectar Câmeras
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Camera & Controls Bar -->
+        <div class="controls-toolbar">
+          <div class="control-group">
+            <button id="btn-start-stream" class="btn btn-primary">
+              <i data-lucide="play"></i> Iniciar Análise
+            </button>
+            <button id="btn-pause-stream" class="btn btn-secondary" disabled>
+              <i data-lucide="pause"></i> Pausar
+            </button>
+            <button id="btn-reset-counters" class="btn btn-outline">
+              <i data-lucide="rotate-ccw"></i> Zerar Treino
+            </button>
+          </div>
+
+          <div class="filter-toggle">
+            <label class="toggle-switch">
+              <input type="checkbox" id="chk-noise-filter" checked>
+              <span class="slider"></span>
+            </label>
+            <span>Filtro de Ruído Espacial</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- RIGHT PANEL: Patient Interaction Frontend & Biomechanical Dashboard -->
+      <section class="dashboard-panel">
+        
+        <!-- Live Patient Feedback Banner -->
+        <div class="patient-feedback-card status-good" id="patient-feedback-card">
+          <div class="feedback-icon" id="feedback-icon-container">
+            <i data-lucide="check-circle-2"></i>
+          </div>
+          <div class="feedback-content">
+            <span class="feedback-tag" id="feedback-tag">EXCELENTE POSTURA</span>
+            <h3 class="feedback-msg" id="feedback-main-msg">Mantenha a coluna neutra e inicie a descida.</h3>
+          </div>
+        </div>
+
+        <!-- Biomechanical Metrics Cards -->
+        <div class="metrics-grid">
+          
+          <!-- Metric 1: Knee Flexion -->
+          <div class="metric-card">
+            <div class="metric-header">
+              <span>Flexão dos Joelhos</span>
+              <i data-lucide="corner-down-right" class="icon-subtle"></i>
+            </div>
+            <div class="metric-body">
+              <div class="metric-value" id="val-knee-angle">175.0°</div>
+              <div class="metric-target">Alvo: 80.0° a 90.0°</div>
+            </div>
+            <div class="progress-bar-container">
+              <div class="progress-bar-fill" id="bar-knee-flexion" style="width: 10%;"></div>
+            </div>
+          </div>
+
+          <!-- Metric 2: Trunk Angle -->
+          <div class="metric-card">
+            <div class="metric-header">
+              <span>Inclinação Tronco</span>
+              <i data-lucide="user-check" class="icon-subtle"></i>
+            </div>
+            <div class="metric-body">
+              <div class="metric-value" id="val-trunk-angle">12.5°</div>
+              <div class="metric-target">Limite Seguro: &lt; 45.0°</div>
+            </div>
+            <div class="progress-bar-container">
+              <div class="progress-bar-fill warning" id="bar-trunk-angle" style="width: 25%;"></div>
+            </div>
+          </div>
+
+          <!-- Metric 3: Dynamic Valgus Risk -->
+          <div class="metric-card">
+            <div class="metric-header">
+              <span>Alinhamento Medial (Valgo)</span>
+              <i data-lucide="shield-alert" class="icon-subtle"></i>
+            </div>
+            <div class="metric-body">
+              <div class="metric-value status-ok" id="val-valgus-status">Normal</div>
+              <div class="metric-target" id="val-valgus-ratio">Desvio: 0.0 cm</div>
+            </div>
+            <div class="status-indicator-bar" id="indicator-valgus"></div>
+          </div>
+
+          <!-- Metric 4: Heel Ground Contact -->
+          <div class="metric-card">
+            <div class="metric-header">
+              <span>Contato dos Calcanhares</span>
+              <i data-lucide="footprints" class="icon-subtle"></i>
+            </div>
+            <div class="metric-body">
+              <div class="metric-value status-ok" id="val-heel-status">Apoiados</div>
+              <div class="metric-target" id="val-heel-elev">Elevação: 0.0 cm</div>
+            </div>
+            <div class="status-indicator-bar" id="indicator-heel"></div>
+          </div>
+
+        </div>
+
+        <!-- Repetition Scoreboard -->
+        <div class="scoreboard-card">
+          <div class="score-item">
+            <span class="score-num text-primary" id="rep-total">0</span>
+            <span class="score-label">Total Reps</span>
+          </div>
+          <div class="score-divider"></div>
+          <div class="score-item">
+            <span class="score-num text-success" id="rep-correct">0</span>
+            <span class="score-label">Corretas (80°-90°)</span>
+          </div>
+          <div class="score-divider"></div>
+          <div class="score-item">
+            <span class="score-num text-danger" id="rep-faults">0</span>
+            <span class="score-label">Com Compensações</span>
+          </div>
+        </div>
+
+        <!-- Real-Time JSON Telemetry Stream Drawer -->
+        <div class="telemetry-card">
+          <div class="telemetry-header">
+            <div class="telemetry-title">
+              <i data-lucide="code"></i>
+              <h3>Protocolo de Saída JSON (Stream Instantânea)</h3>
+            </div>
+            <div class="telemetry-actions">
+              <button id="btn-copy-json" class="btn-sm btn-outline" title="Copiar JSON do Frame">
+                <i data-lucide="copy"></i> Copiar
+              </button>
+              <button id="btn-download-session" class="btn-sm btn-outline" title="Baixar Histórico de Dados">
+                <i data-lucide="download"></i> Exportar
+              </button>
+            </div>
+          </div>
+
+          <!-- Real-Time Syntax Highlighted Code Viewer -->
+          <div class="json-code-box">
+            <pre><code id="json-stream-output">{\n  "status": "Aguardando início da captação..."\n}</code></pre>
+          </div>
+        </div>
+
+      </section>
+    </main>
+
+    <!-- Footer Footer Information -->
+    <footer class="app-footer">
+      <p>BioPhysio AI System &copy; 2026 — Motor de Análise Fisioterapêutica e Biomecânica Portátil em Tempo Real</p>
+    </footer>
+
+  </div>
+
+  <!-- JavaScript Application Modules -->
+  <script src="biomechanics.js"></script>
+  <script src="app.js"></script>
+  <script>
+    // Initialize Lucide icons
+    lucide.createIcons();
+  </script>
+</body>
+</html>

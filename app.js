@@ -1010,7 +1010,268 @@ document.addEventListener('DOMContentLoaded', () => {
     downloadAnchor.remove();
   });
 
-  // Iniciar simulador por padrão
-  btnStart.click();
-});
+    // =========================================================================
+  // SISTEMA DE NAVEGAÇÃO & MENU DE INÍCIO HOSPITALAR (ROUTER & TRIAGEM)
+  // =========================================================================
+  const viewHome = document.getElementById('view-home');
+  const viewWorkout = document.getElementById('view-workout');
+  const btnNavHome = document.getElementById('btn-nav-home');
+  const btnNavSession = document.getElementById('btn-nav-session');
+  const btnBackHome = document.getElementById('btn-back-home');
+  const brandLink = document.getElementById('brand-link');
+  const navSessionBadge = document.getElementById('nav-session-badge');
 
+  // Triagem e Paciente
+  const inputPatientName = document.getElementById('input-patient-name');
+  const inputTherapistName = document.getElementById('input-therapist-name');
+  const homeSourceSelect = document.getElementById('home-source-select');
+  const lblActivePatient = document.getElementById('lbl-active-patient');
+  const lblActiveExercise = document.getElementById('lbl-active-exercise');
+  const btnQuickStartCamera = document.getElementById('btn-quick-start-camera');
+  const btnQuickStartSim = document.getElementById('btn-quick-start-sim');
+  const homeLiveDatetime = document.getElementById('home-live-datetime');
+  const btnHomeConnectBle = document.getElementById('btn-home-connect-ble');
+
+  // Modal de Laudo Clínico
+  const modalClinicalReport = document.getElementById('modal-clinical-report');
+  const btnOpenReport = document.getElementById('btn-open-report');
+  const btnQuickReport = document.getElementById('btn-quick-report');
+  const btnCloseReport = document.getElementById('btn-close-report');
+  const btnPrintReport = document.getElementById('btn-print-report');
+
+  const repReportId = document.getElementById('rep-report-id');
+  const repPatientName = document.getElementById('rep-patient-name');
+  const repTherapistName = document.getElementById('rep-therapist-name');
+  const repProtocolName = document.getElementById('rep-protocol-name');
+  const repTimestamp = document.getElementById('rep-timestamp');
+  const repTTotal = document.getElementById('rep-t-total');
+  const repTCorrect = document.getElementById('rep-t-correct');
+  const repTFaults = document.getElementById('rep-t-faults');
+  const repTScore = document.getElementById('rep-t-score');
+  const repTScoreStatus = document.getElementById('rep-t-score-status');
+  const repClinicalText = document.getElementById('rep-clinical-text');
+  const repSigTherapist = document.getElementById('rep-sig-therapist');
+
+  const exerciseNamesMap = {
+    'squat': 'Agachamento Terapêutico (Joelho & LCA)',
+    'shoulder_abduction': 'Abdução de Ombro (Manguito Rotador)',
+    'biceps_curl': 'Rosca Direta de Bíceps',
+    'triceps_extension': 'Extensão de Tríceps (Coice)'
+  };
+
+  // Atualizar Relógio em Tempo Real
+  function updateLiveClock() {
+    const now = new Date();
+    const formatted = now.toLocaleDateString('pt-BR') + ' ' + now.toLocaleTimeString('pt-BR');
+    if (homeLiveDatetime) homeLiveDatetime.textContent = formatted;
+  }
+  setInterval(updateLiveClock, 1000);
+  updateLiveClock();
+
+  // Função de Troca de Telas
+  function navigateToView(viewName) {
+    if (viewName === 'home') {
+      if (viewHome) {
+        viewHome.classList.remove('hidden');
+        viewHome.classList.add('active');
+      }
+      if (viewWorkout) {
+        viewWorkout.classList.add('hidden');
+        viewWorkout.classList.remove('active');
+      }
+      if (btnNavHome) btnNavHome.classList.add('active');
+      if (btnNavSession) btnNavSession.classList.remove('active');
+    } else if (viewName === 'workout') {
+      if (viewHome) {
+        viewHome.classList.add('hidden');
+        viewHome.classList.remove('active');
+      }
+      if (viewWorkout) {
+        viewWorkout.classList.remove('hidden');
+        viewWorkout.classList.add('active');
+      }
+      if (btnNavHome) btnNavHome.classList.remove('active');
+      if (btnNavSession) btnNavSession.classList.add('active');
+
+      // Sincronizar dados do paciente na tela do monitor
+      const pName = (inputPatientName && inputPatientName.value.trim()) || 'Paciente #PAC-2026-084';
+      if (lblActivePatient) lblActivePatient.textContent = pName;
+
+      const currentExKey = exerciseSelect ? exerciseSelect.value : 'squat';
+      if (lblActiveExercise) lblActiveExercise.textContent = exerciseNamesMap[currentExKey] || currentExKey;
+
+      if (navSessionBadge) {
+        navSessionBadge.textContent = 'Ativo';
+        navSessionBadge.classList.add('active');
+      }
+
+      // Redimensionar canvas de vídeo
+      setTimeout(() => {
+        resizeCanvas();
+      }, 60);
+    }
+
+    if (window.lucide) {
+      lucide.createIcons();
+    }
+  }
+
+  // Eventos de Navegação
+  if (btnNavHome) btnNavHome.addEventListener('click', () => navigateToView('home'));
+  if (brandLink) brandLink.addEventListener('click', () => navigateToView('home'));
+  if (btnBackHome) btnBackHome.addEventListener('click', () => navigateToView('home'));
+  if (btnNavSession) btnNavSession.addEventListener('click', () => navigateToView('workout'));
+
+  // Sincronizar alteração no seletor de exercícios com os rótulos do cabeçalho
+  if (exerciseSelect) {
+    exerciseSelect.addEventListener('change', (e) => {
+      const selectedId = e.target.value;
+      if (lblActiveExercise) lblActiveExercise.textContent = exerciseNamesMap[selectedId] || selectedId;
+    });
+  }
+
+  // Cards de Seleção de Protocolo no Menu Inicial
+  const protocolCards = document.querySelectorAll('.protocol-card');
+  protocolCards.forEach(card => {
+    card.addEventListener('click', () => {
+      const exKey = card.getAttribute('data-exercise');
+      if (exKey && exerciseSelect) {
+        exerciseSelect.value = exKey;
+        analyzer.setExercise(exKey);
+        btnReset.click();
+      }
+
+      if (homeSourceSelect && sourceSelect) {
+        sourceSelect.value = homeSourceSelect.value;
+        sourceSelect.dispatchEvent(new Event('change'));
+      }
+
+      navigateToView('workout');
+
+      if (!isRunning) {
+        btnStart.click();
+      }
+    });
+  });
+
+  // Botões de Ação Rápida no Menu Inicial
+  if (btnQuickStartCamera) {
+    btnQuickStartCamera.addEventListener('click', () => {
+      if (sourceSelect) {
+        sourceSelect.value = 'webcam';
+        sourceSelect.dispatchEvent(new Event('change'));
+      }
+      navigateToView('workout');
+      if (!isRunning) {
+        btnStart.click();
+      }
+    });
+  }
+
+  if (btnQuickStartSim) {
+    btnQuickStartSim.addEventListener('click', () => {
+      if (sourceSelect) {
+        sourceSelect.value = 'simulated';
+        sourceSelect.dispatchEvent(new Event('change'));
+      }
+      navigateToView('workout');
+      if (!isRunning) {
+        btnStart.click();
+      }
+    });
+  }
+
+  // Conexão IoT rápida do Menu Inicial
+  if (btnHomeConnectBle && btnConnectArduino) {
+    btnHomeConnectBle.addEventListener('click', (e) => {
+      e.stopPropagation();
+      btnConnectArduino.click();
+    });
+  }
+
+  // =========================================================================
+  // MODAL DE LAUDO CLÍNICO (EMISSÃO E IMPRESSÃO)
+  // =========================================================================
+  function populateAndOpenReport() {
+    const pName = (inputPatientName && inputPatientName.value.trim()) || 'Paciente #PAC-2026-084';
+    const tName = (inputTherapistName && inputTherapistName.value.trim()) || 'Dra. Fisioterapeuta Clínica (CREFITO-3)';
+    const exKey = (exerciseSelect && exerciseSelect.value) || 'squat';
+    const exName = exerciseNamesMap[exKey] || 'Agachamento Terapêutico';
+
+    const totalReps = parseInt(repTotal.textContent, 10) || 0;
+    const correctReps = parseInt(repCorrect.textContent, 10) || 0;
+    const faultReps = parseInt(repFaults.textContent, 10) || 0;
+
+    let scorePercent = 100;
+    if (totalReps > 0) {
+      scorePercent = Math.round((correctReps / totalReps) * 100);
+    }
+
+    const now = new Date();
+    const dateFormatted = now.toLocaleDateString('pt-BR') + ' às ' + now.toLocaleTimeString('pt-BR');
+
+    if (repReportId) repReportId.textContent = '#BP-' + now.getFullYear() + '-' + Math.floor(1000 + Math.random() * 9000);
+    if (repPatientName) repPatientName.textContent = pName;
+    if (repTherapistName) repTherapistName.textContent = tName;
+    if (repSigTherapist) repSigTherapist.textContent = tName;
+    if (repProtocolName) repProtocolName.textContent = exName;
+    if (repTimestamp) repTimestamp.textContent = dateFormatted;
+
+    if (repTTotal) repTTotal.textContent = totalReps + ' repetições';
+    if (repTCorrect) repTCorrect.textContent = correctReps + ' repetições';
+    if (repTFaults) repTFaults.textContent = faultReps + ' repetições';
+    if (repTScore) repTScore.textContent = scorePercent + '%';
+
+    if (repTScoreStatus) {
+      if (scorePercent >= 80) {
+        repTScoreStatus.innerHTML = '<span class="r-status-ok" style="background: #ecfdf5; color: #059669;">Excelente (' + scorePercent + '%)</span>';
+      } else if (scorePercent >= 60) {
+        repTScoreStatus.innerHTML = '<span class="r-status-ok" style="background: #fffbeb; color: #d97706;">Regular (' + scorePercent + '%)</span>';
+      } else {
+        repTScoreStatus.innerHTML = '<span class="r-status-ok" style="background: #fef2f2; color: #dc2626;">Atenção Requerida (' + scorePercent + '%)</span>';
+      }
+    }
+
+    if (repClinicalText) {
+      if (totalReps === 0) {
+        repClinicalText.textContent = 'A sessão de atendimento foi inicializada. Aguardando a execução completa de repetições pelo paciente para consolidar a análise biomecânica e estabilidade articular.';
+      } else if (scorePercent >= 80) {
+        repClinicalText.textContent = 'O paciente demonstrou excelente controle motor e alinhamento biomecânico ao longo do protocolo ' + exName + '. Os parâmetros de amplitude angular e fixação postural mantiveram-se dentro da faixa terapêutica recomendada pela literatura.';
+      } else {
+        repClinicalText.textContent = 'Durante a execução de ' + exName + ', foram observadas compensações pontuais (ex: desvios na trajetória articular ou compensação lombar). Recomenda-se ajuste de cadência e trabalho de fortalecimento sinergista nas próximas sessões.';
+      }
+    }
+
+    if (modalClinicalReport) {
+      modalClinicalReport.classList.remove('hidden');
+      if (window.lucide) lucide.createIcons();
+    }
+  }
+
+  if (btnOpenReport) btnOpenReport.addEventListener('click', populateAndOpenReport);
+  if (btnQuickReport) btnQuickReport.addEventListener('click', populateAndOpenReport);
+
+  if (btnCloseReport) {
+    btnCloseReport.addEventListener('click', () => {
+      if (modalClinicalReport) modalClinicalReport.classList.add('hidden');
+    });
+  }
+
+  if (btnPrintReport) {
+    btnPrintReport.addEventListener('click', () => {
+      window.print();
+    });
+  }
+
+  // Fechar modal ao clicar fora
+  if (modalClinicalReport) {
+    modalClinicalReport.addEventListener('click', (e) => {
+      if (e.target === modalClinicalReport) {
+        modalClinicalReport.classList.add('hidden');
+      }
+    });
+  }
+
+  // Inicialização padrão na tela de Início (Home)
+  navigateToView('home');
+});

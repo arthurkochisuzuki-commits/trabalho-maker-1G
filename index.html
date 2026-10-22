@@ -3,13 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BioPhysio AI - Motor de Análise Biomecânica em Tempo Real</title>
-  <meta name="description" content="Sistema portátil de análise biomecânica de movimentos fisioterapêuticos em tempo real com Visão Computacional.">
+  <title>BioPhysio MedTech - Sistema Clínico de Reabilitação & Biomecânica</title>
+  <meta name="description" content="Sistema hospitalar e portátil de análise biomecânica e fisioterapia em tempo real com Visão Computacional e IoT.">
   
-  <!-- Google Fonts -->
+  <!-- Google Fonts: Inter & Outfit -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   
   <!-- Lucide Icons (CDN) -->
   <script src="https://unpkg.com/lucide@latest"></script>
@@ -24,275 +24,726 @@
 <body>
   <div class="app-container">
     
-    <!-- Top Navigation Bar -->
+    <!-- Top Hospital Navigation Bar -->
     <header class="navbar">
-      <div class="brand">
+      <div class="brand" id="brand-link" style="cursor: pointer;" title="Ir para a Tela Inicial">
         <div class="brand-icon">
           <i data-lucide="activity"></i>
         </div>
         <div class="brand-text">
-          <h1>BioPhysio <span>AI Engine</span></h1>
-          <p>Análise Biomecânica Portátil & Protocolo JSON em Tempo Real</p>
+          <h1>BioPhysio <span class="brand-highlight">MedTech</span></h1>
+          <p>Unidade Hospitalar de Reabilitação & Biomecânica Clínica</p>
         </div>
       </div>
+
+      <!-- Navigation Tabs (Home vs Clinical Monitor) -->
+      <nav class="nav-tabs-group">
+        <button id="btn-nav-home" class="nav-tab active">
+          <i data-lucide="layout-dashboard"></i>
+          <span>Menu Inicial</span>
+        </button>
+        <button id="btn-nav-session" class="nav-tab">
+          <i data-lucide="video"></i>
+          <span>Monitor Clínico</span>
+          <span class="tab-badge" id="nav-session-badge">Inativo</span>
+        </button>
+      </nav>
       
       <div class="navbar-actions">
+        <!-- Live System & Frame Status -->
         <div class="status-badge" id="system-status">
           <span class="pulse-dot green"></span>
-          <span id="status-text">Motor Conectado (30 FPS)</span>
+          <span id="status-text">Motor IA Operacional (30 FPS)</span>
         </div>
 
-        <button id="btn-connect-arduino" class="btn btn-sm btn-outline" title="Conectar ao Arduino via Web Serial (IoT)">
-          <i data-lucide="cpu"></i> Conectar Arduino (IoT)
+        <!-- IoT Arduino BLE Connector -->
+        <button id="btn-connect-arduino" class="btn btn-sm btn-outline" title="Conectar ao Sensor Inercial via BLE / Web Serial">
+          <i data-lucide="bluetooth"></i>
+          <span class="btn-text">Sensor IoT (BLE)</span>
         </button>
 
-        <button id="btn-toggle-voice" class="btn-icon active" title="Ativar/Desativar Sintetizador de Voz">
+        <!-- Generate Medical Report Button -->
+        <button id="btn-open-report" class="btn btn-sm btn-primary-alt" title="Gerar e Visualizar Laudo Fisioterapêutico">
+          <i data-lucide="file-text"></i>
+          <span class="btn-text">Emitir Laudo</span>
+        </button>
+
+        <!-- Audio Biofeedback Toggle -->
+        <button id="btn-toggle-voice" class="btn-icon active" title="Ativar/Desativar Biofeedback Sonoro por Voz">
           <i data-lucide="volume-2"></i>
         </button>
       </div>
     </header>
 
-    <!-- Main Workspace Grid -->
-    <main class="workspace-grid">
+    <!-- ========================================================================= -->
+    <!-- VIEW 1: HOME MENU (RECEPÇÃO HOSPITALAR & SELEÇÃO DE PROTOCOLOS)          -->
+    <!-- ========================================================================= -->
+    <section id="view-home" class="view-section active">
       
-      <!-- LEFT PANEL: Capture & Camera Overlay Viewport -->
-      <section class="viewport-card">
-        <div class="card-header">
-          <div class="card-title">
-            <i data-lucide="camera"></i>
-            <h2>Interface de Captação & Exercício</h2>
+      <!-- Welcome Hero Banner -->
+      <div class="hospital-hero-banner">
+        <div class="hero-left">
+          <div class="hospital-subtag">
+            <span class="hospital-dot"></span>
+            HOSPITAL UNIVERSITÁRIO &bull; DEPARTAMENTO DE FISIOTERAPIA & BIOMECÂNICA
           </div>
+          <h2 class="hero-title">Portal de Atendimento e Telemetria Motora</h2>
+          <p class="hero-description">
+            Plataforma clínica assistida por Inteligência Artificial (MediaPipe Pose) e Sensores Inerciais IoT (LeanStar BLE) para avaliação articular, biofeedback goniométrico em tempo real e prevenção de lesões.
+          </p>
+        </div>
+        <div class="hero-right">
+          <div class="station-card">
+            <div class="station-header">
+              <i data-lucide="shield-check"></i>
+              <span>ESTAÇÃO CLÍNICA #01</span>
+            </div>
+            <div class="station-body">
+              <div class="station-meta-row">
+                <span class="meta-label">Data / Hora:</span>
+                <span class="meta-value" id="home-live-datetime">--/--/---- --:--</span>
+              </div>
+              <div class="station-meta-row">
+                <span class="meta-label">Protocolos Ativos:</span>
+                <span class="meta-value text-accent">4 Módulos Validados</span>
+              </div>
+              <div class="station-meta-row">
+                <span class="meta-label">Telemetria:</span>
+                <span class="meta-value text-success">Padrão JSON HL7/FHIR</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
 
-          <div class="selector-group" style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-            <select id="exercise-select" class="select-input" style="font-weight: 600; border-color: var(--color-primary);">
-              <optgroup label="Membros Inferiores">
-                <option value="squat">🏋️ Agachamento Terapêutico</option>
-              </optgroup>
-              <optgroup label="Membros Superiores (Fase 2)">
-                <option value="shoulder_abduction">🦾 Abdução de Ombro (Elevação)</option>
-                <option value="biceps_curl">💪 Rosca Direta de Bíceps</option>
-                <option value="triceps_extension">💥 Extensão de Tríceps (Coice)</option>
-              </optgroup>
-            </select>
-
-            <select id="input-source-select" class="select-input">
-              <option value="simulated">⚡ Simulador Sintético (Demonstração 3D)</option>
-              <option value="webcam">📷 Câmera ao Vivo (Webcam)</option>
-              <option value="video">📁 Carregar Arquivo de Vídeo</option>
-            </select>
-
-            <select id="camera-device-select" class="select-input hidden" style="border-color: var(--color-success); font-weight: 500;">
-              <option value="">🔍 Procurando Câmeras...</option>
-            </select>
-
-            <button id="btn-scan-cameras" class="btn btn-sm btn-outline" title="Localizar e listar câmeras presentes neste computador/dispositivo">
-              <i data-lucide="video"></i> Detectar Câmeras
-            </button>
-
-            <input type="file" id="video-file-input" accept="video/*" style="display: none;">
+      <!-- Quick Triage & Patient Strip -->
+      <div class="triage-strip-card">
+        <div class="triage-title">
+          <i data-lucide="clipboard-list"></i>
+          <div>
+            <h3>Triagem Rápida & Prontuário do Paciente</h3>
+            <p>Identifique o paciente antes de iniciar a sessão clínica de reabilitação</p>
           </div>
         </div>
 
-        <!-- Video & HUD Overlay Canvas Viewport -->
-        <div class="canvas-wrapper" id="canvas-wrapper">
-          <video id="input-video" playsinline muted style="display: none;"></video>
-          <canvas id="output-canvas"></canvas>
-          
-          <!-- Camera Distance Calibration Toast -->
-          <div class="canvas-distance-toast" id="canvas-distance-toast">
-            <i data-lucide="ruler"></i>
-            <span id="canvas-distance-msg">Verificando enquadramento...</span>
-          </div>
-
-          <!-- Subject Tracker Lock Badge -->
-          <div class="canvas-lock-badge hidden" id="canvas-lock-badge">
-            <i data-lucide="user-check"></i>
-            <span>Paciente Alvo Travado</span>
-            <button id="btn-unlock-subject" title="Desdestravar paciente alvo">×</button>
-          </div>
-
-          <!-- Floating Status Overlay -->
-          <div class="hud-phase-overlay" id="hud-phase-overlay">
-            <span class="hud-label">FASE ATUAL</span>
-            <span class="hud-phase-val" id="hud-phase-text">EM PÉ (NEUTRO)</span>
-          </div>
-
-          <!-- Angle Quick Badge -->
-          <div class="hud-angle-badge" id="hud-angle-badge">
-            <span class="angle-val" id="hud-knee-angle">175°</span>
-            <span class="angle-sub" id="hud-angle-sub">Ângulo Alvo</span>
-          </div>
-
-          <!-- Dynamic Warning Toast on Canvas -->
-          <div class="canvas-warning-toast hidden" id="canvas-warning-toast">
-            <i data-lucide="alert-triangle"></i>
-            <span id="canvas-warning-msg">Compensação Postural Detectada!</span>
-          </div>
-
-          <!-- Camera Error / Permission Banner -->
-          <div id="camera-error-banner" class="camera-error-banner hidden">
-            <i data-lucide="camera-off"></i>
-            <div class="camera-error-content">
-              <strong id="camera-error-title">Câmera Não Conectada</strong>
-              <p id="camera-error-msg">Não foi possível acessar a câmera do computador. Verifique as permissões do seu navegador.</p>
+        <div class="triage-inputs-grid">
+          <div class="triage-field">
+            <label for="input-patient-name">Nome / ID do Paciente:</label>
+            <div class="input-with-icon">
+              <i data-lucide="user"></i>
+              <input type="text" id="input-patient-name" class="medical-input" value="Paciente #PAC-2026-084" placeholder="Ex: Paciente 01">
             </div>
-            <div class="camera-error-actions" style="display: flex; gap: 0.5rem;">
-              <button id="btn-retry-camera" class="btn btn-sm btn-primary">
-                <i data-lucide="refresh-cw"></i> Tentar Novamente
-              </button>
-              <button id="btn-scan-cameras-error" class="btn btn-sm btn-outline" style="background: rgba(255,255,255,0.1); border-color: #fff; color: #fff;">
+          </div>
+
+          <div class="triage-field">
+            <label for="input-therapist-name">Fisioterapeuta Responsável:</label>
+            <div class="input-with-icon">
+              <i data-lucide="stethoscope"></i>
+              <input type="text" id="input-therapist-name" class="medical-input" value="Dra. Fisioterapeuta Clínica (CREFITO-3)" placeholder="Nome do Profissional">
+            </div>
+          </div>
+
+          <div class="triage-field">
+            <label for="home-source-select">Fonte de Captação Biomecânica:</label>
+            <div class="input-with-icon">
+              <i data-lucide="video"></i>
+              <select id="home-source-select" class="medical-select">
+                <option value="simulated">⚡ Simulador Virtual 3D (Demonstração Sem Câmera)</option>
+                <option value="webcam" selected>📷 Câmera ao Vivo (Webcam Clínica)</option>
+                <option value="video">📁 Arquivo de Vídeo Pré-gravado</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="triage-actions">
+          <button id="btn-quick-start-camera" class="btn btn-primary btn-lg">
+            <i data-lucide="camera"></i>
+            <span>Iniciar Sessão com Câmera ao Vivo</span>
+          </button>
+          
+          <button id="btn-quick-start-sim" class="btn btn-outline-primary btn-lg" title="Ideal para banca examinadora ou testes imediatos">
+            <i data-lucide="sparkles"></i>
+            <span>⚡ Modo Demonstração Rápida (Simulador 3D)</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Protocols Grid (Exercise Library) -->
+      <div class="protocols-section">
+        <div class="section-heading">
+          <div>
+            <span class="section-tag">CATÁLOGO CLÍNICO</span>
+            <h3 class="section-title">Selecione o Protocolo Fisioterapêutico</h3>
+          </div>
+          <span class="protocols-badge">Clique no card para iniciar o atendimento</span>
+        </div>
+
+        <div class="protocols-grid">
+          
+          <!-- Protocol 1: Squat (Knee & Hip) -->
+          <div class="protocol-card" data-exercise="squat">
+            <div class="protocol-card-header">
+              <div class="protocol-icon blue">
+                <i data-lucide="activity"></i>
+              </div>
+              <span class="protocol-category">Membros Inferiores</span>
+            </div>
+            <h4 class="protocol-name">Agachamento Terapêutico Guiado</h4>
+            <p class="protocol-desc">Avaliação e reabilitação pós-cirúrgica de LCA, tendinopatia patelar e prevenção de valgo dinâmico com controle do alinhamento do tronco.</p>
+            <div class="protocol-specs">
+              <div class="spec-item">
+                <span class="spec-label">Articulação Alvo:</span>
+                <span class="spec-val">Joelhos & Quadril</span>
+              </div>
+              <div class="spec-item">
+                <span class="spec-label">Ângulo Alvo (ROM):</span>
+                <span class="spec-val text-accent">80.0° a 90.0°</span>
+              </div>
+              <div class="spec-item">
+                <span class="spec-label">Tronco Limite:</span>
+                <span class="spec-val">&lt; 45.0°</span>
+              </div>
+            </div>
+            <button class="btn btn-protocol-select">
+              <span>Iniciar Protocolo</span>
+              <i data-lucide="chevron-right"></i>
+            </button>
+          </div>
+
+          <!-- Protocol 2: Shoulder Abduction -->
+          <div class="protocol-card" data-exercise="shoulder_abduction">
+            <div class="protocol-card-header">
+              <div class="protocol-icon green">
+                <i data-lucide="shield-check"></i>
+              </div>
+              <span class="protocol-category">Membros Superiores</span>
+            </div>
+            <h4 class="protocol-name">Abdução de Ombro (Elevação)</h4>
+            <p class="protocol-desc">Recuperação de amplitude glenoumeral, reabilitação de manguito rotador, bursite subacromial e monitoramento de compensação escapulotorácica.</p>
+            <div class="protocol-specs">
+              <div class="spec-item">
+                <span class="spec-label">Articulação Alvo:</span>
+                <span class="spec-val">Complexo do Ombro</span>
+              </div>
+              <div class="spec-item">
+                <span class="spec-label">Ângulo Alvo (ROM):</span>
+                <span class="spec-val text-accent">0.0° a 180.0°</span>
+              </div>
+              <div class="spec-item">
+                <span class="spec-label">Assimetria Alvo:</span>
+                <span class="spec-val">&lt; 15.0°</span>
+              </div>
+            </div>
+            <button class="btn btn-protocol-select">
+              <span>Iniciar Protocolo</span>
+              <i data-lucide="chevron-right"></i>
+            </button>
+          </div>
+
+          <!-- Protocol 3: Biceps Curl -->
+          <div class="protocol-card" data-exercise="biceps_curl">
+            <div class="protocol-card-header">
+              <div class="protocol-icon indigo">
+                <i data-lucide="zap"></i>
+              </div>
+              <span class="protocol-category">Membros Superiores</span>
+            </div>
+            <h4 class="protocol-name">Rosca Direta de Bíceps</h4>
+            <p class="protocol-desc">Fortalecimento excêntrico/concêntrico dos flexores de cotovelo, controle de pêndulo lombar e estabilização postural na postura ortostática.</p>
+            <div class="protocol-specs">
+              <div class="spec-item">
+                <span class="spec-label">Articulação Alvo:</span>
+                <span class="spec-val">Cotovelo & Antebraço</span>
+              </div>
+              <div class="spec-item">
+                <span class="spec-label">Ângulo Alvo (ROM):</span>
+                <span class="spec-val text-accent">30.0° a 145.0°</span>
+              </div>
+              <div class="spec-item">
+                <span class="spec-label">Balanço Lombar:</span>
+                <span class="spec-val">&lt; 10.0°</span>
+              </div>
+            </div>
+            <button class="btn btn-protocol-select">
+              <span>Iniciar Protocolo</span>
+              <i data-lucide="chevron-right"></i>
+            </button>
+          </div>
+
+          <!-- Protocol 4: Triceps Extension -->
+          <div class="protocol-card" data-exercise="triceps_extension">
+            <div class="protocol-card-header">
+              <div class="protocol-icon amber">
+                <i data-lucide="target"></i>
+              </div>
+              <span class="protocol-category">Cadeia Posterior</span>
+            </div>
+            <h4 class="protocol-name">Extensão de Tríceps (Coice)</h4>
+            <p class="protocol-desc">Reabilitação extensora de cotovelo, fortalecimento de tríceps braquial e manutenção do alinhamento cervical e torácico sob carga.</p>
+            <div class="protocol-specs">
+              <div class="spec-item">
+                <span class="spec-label">Articulação Alvo:</span>
+                <span class="spec-val">Cotovelo & Tríceps</span>
+              </div>
+              <div class="spec-item">
+                <span class="spec-label">Ângulo Alvo (ROM):</span>
+                <span class="spec-val text-accent">90.0° a 170.0°</span>
+              </div>
+              <div class="spec-item">
+                <span class="spec-label">Fixação Escapular:</span>
+                <span class="spec-val">Estável</span>
+              </div>
+            </div>
+            <button class="btn btn-protocol-select">
+              <span>Iniciar Protocolo</span>
+              <i data-lucide="chevron-right"></i>
+            </button>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Medical Device Telemetry Checklist -->
+      <div class="devices-checklist-strip">
+        <div class="checklist-item">
+          <div class="device-icon success">
+            <i data-lucide="eye"></i>
+          </div>
+          <div class="device-info">
+            <strong>Câmera IA & MediaPipe</strong>
+            <span>33 Marcos Anatômicos 3D em Tempo Real</span>
+          </div>
+          <span class="device-status-badge ready">Pronta</span>
+        </div>
+
+        <div class="checklist-item">
+          <div class="device-icon blue">
+            <i data-lucide="bluetooth"></i>
+          </div>
+          <div class="device-info">
+            <strong>Sensor Inercial LeanStar (IoT)</strong>
+            <span>Goniômetro Digital BLE / Serial Arduino</span>
+          </div>
+          <button id="btn-home-connect-ble" class="btn btn-xs btn-outline">Parear</button>
+        </div>
+
+        <div class="checklist-item">
+          <div class="device-icon green">
+            <i data-lucide="volume-2"></i>
+          </div>
+          <div class="device-info">
+            <strong>Sintetizador de Biofeedback</strong>
+            <span>Instruções Corretivas por Voz (pt-BR)</span>
+          </div>
+          <span class="device-status-badge ready">Ativado</span>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ========================================================================= -->
+    <!-- VIEW 2: CLINICAL WORKOUT MONITOR (CÂMERA, HUD & TELEMETRIA EM TEMPO REAL) -->
+    <!-- ========================================================================= -->
+    <section id="view-workout" class="view-section hidden">
+      
+      <!-- Session Bar with Active Patient & Return Button -->
+      <div class="session-top-bar">
+        <div class="session-patient-info">
+          <button id="btn-back-home" class="btn btn-sm btn-outline" title="Voltar para a Recepção">
+            <i data-lucide="arrow-left"></i>
+            <span>Voltar ao Menu</span>
+          </button>
+          <div class="patient-pill">
+            <i data-lucide="user"></i>
+            <span>Paciente: <strong id="lbl-active-patient">Paciente #PAC-2026-084</strong></span>
+          </div>
+          <div class="protocol-pill">
+            <i data-lucide="activity"></i>
+            <span>Protocolo: <strong id="lbl-active-exercise">Agachamento Terapêutico</strong></span>
+          </div>
+        </div>
+
+        <div class="session-quick-actions">
+          <button id="btn-quick-report" class="btn btn-sm btn-outline-primary" title="Abrir Laudo da Sessão Atual">
+            <i data-lucide="file-text"></i>
+            <span>Ver Laudo Clínico</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Main Workspace Grid -->
+      <main class="workspace-grid">
+        
+        <!-- LEFT PANEL: Capture & Camera Overlay Viewport -->
+        <section class="viewport-card">
+          <div class="card-header">
+            <div class="card-title">
+              <i data-lucide="camera"></i>
+              <h2>Monitor Goniométrico de Vídeo</h2>
+            </div>
+
+            <div class="selector-group" style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+              <select id="exercise-select" class="select-input" style="font-weight: 600; border-color: var(--color-primary);">
+                <optgroup label="Membros Inferiores">
+                  <option value="squat">🏋️ Agachamento Terapêutico</option>
+                </optgroup>
+                <optgroup label="Membros Superiores (Fase 2)">
+                  <option value="shoulder_abduction">🦾 Abdução de Ombro (Elevação)</option>
+                  <option value="biceps_curl">💪 Rosca Direta de Bíceps</option>
+                  <option value="triceps_extension">💥 Extensão de Tríceps (Coice)</option>
+                </optgroup>
+              </select>
+
+              <select id="input-source-select" class="select-input">
+                <option value="simulated">⚡ Simulador Sintético (Demonstração 3D)</option>
+                <option value="webcam" selected>📷 Câmera ao Vivo (Webcam)</option>
+                <option value="video">📁 Carregar Arquivo de Vídeo</option>
+              </select>
+
+              <select id="camera-device-select" class="select-input hidden" style="border-color: var(--color-success); font-weight: 500;">
+                <option value="">🔍 Procurando Câmeras...</option>
+              </select>
+
+              <button id="btn-scan-cameras" class="btn btn-sm btn-outline" title="Localizar e listar câmeras presentes neste computador/dispositivo">
                 <i data-lucide="video"></i> Detectar Câmeras
               </button>
+
+              <input type="file" id="video-file-input" accept="video/*" style="display: none;">
             </div>
           </div>
-        </div>
 
-        <!-- Camera & Controls Bar -->
-        <div class="controls-toolbar">
-          <div class="control-group">
-            <button id="btn-start-stream" class="btn btn-primary">
-              <i data-lucide="play"></i> Iniciar Análise
-            </button>
-            <button id="btn-pause-stream" class="btn btn-secondary" disabled>
-              <i data-lucide="pause"></i> Pausar
-            </button>
-            <button id="btn-reset-counters" class="btn btn-outline">
-              <i data-lucide="rotate-ccw"></i> Zerar Treino
-            </button>
+          <!-- Video & HUD Overlay Canvas Viewport -->
+          <div class="canvas-wrapper" id="canvas-wrapper">
+            <video id="input-video" playsinline muted style="display: none;"></video>
+            <canvas id="output-canvas"></canvas>
+            
+            <!-- Camera Distance Calibration Toast -->
+            <div class="canvas-distance-toast" id="canvas-distance-toast">
+              <i data-lucide="ruler"></i>
+              <span id="canvas-distance-msg">Verificando enquadramento...</span>
+            </div>
+
+            <!-- Subject Tracker Lock Badge -->
+            <div class="canvas-lock-badge hidden" id="canvas-lock-badge">
+              <i data-lucide="user-check"></i>
+              <span>Paciente Alvo Travado</span>
+              <button id="btn-unlock-subject" title="Desdestravar paciente alvo">×</button>
+            </div>
+
+            <!-- Floating Status Overlay -->
+            <div class="hud-phase-overlay" id="hud-phase-overlay">
+              <span class="hud-label">FASE DO MOVIMENTO</span>
+              <span class="hud-phase-val" id="hud-phase-text">EM PÉ (NEUTRO)</span>
+            </div>
+
+            <!-- Angle Quick Badge -->
+            <div class="hud-angle-badge" id="hud-angle-badge">
+              <span class="angle-val" id="hud-knee-angle">175°</span>
+              <span class="angle-sub" id="hud-angle-sub">Ângulo Alvo (ROM)</span>
+            </div>
+
+            <!-- Dynamic Warning Toast on Canvas -->
+            <div class="canvas-warning-toast hidden" id="canvas-warning-toast">
+              <i data-lucide="alert-triangle"></i>
+              <span id="canvas-warning-msg">Compensação Postural Detectada!</span>
+            </div>
+
+            <!-- Camera Error / Permission Banner -->
+            <div id="camera-error-banner" class="camera-error-banner hidden">
+              <i data-lucide="camera-off"></i>
+              <div class="camera-error-content">
+                <strong id="camera-error-title">Câmera Não Conectada</strong>
+                <p id="camera-error-msg">Não foi possível acessar a câmera do computador. Verifique as permissões do seu navegador.</p>
+              </div>
+              <div class="camera-error-actions" style="display: flex; gap: 0.5rem;">
+                <button id="btn-retry-camera" class="btn btn-sm btn-primary">
+                  <i data-lucide="refresh-cw"></i> Tentar Novamente
+                </button>
+                <button id="btn-scan-cameras-error" class="btn btn-sm btn-outline" style="background: rgba(255,255,255,0.1); border-color: #fff; color: #fff;">
+                  <i data-lucide="video"></i> Detectar Câmeras
+                </button>
+              </div>
+            </div>
           </div>
 
-          <div class="filter-toggle">
-            <label class="toggle-switch">
-              <input type="checkbox" id="chk-noise-filter" checked>
-              <span class="slider"></span>
-            </label>
-            <span>Filtro de Ruído Espacial</span>
-          </div>
-        </div>
-      </section>
+          <!-- Camera & Controls Bar -->
+          <div class="controls-toolbar">
+            <div class="control-group">
+              <button id="btn-start-stream" class="btn btn-primary">
+                <i data-lucide="play"></i> Iniciar Análise
+              </button>
+              <button id="btn-pause-stream" class="btn btn-secondary" disabled>
+                <i data-lucide="pause"></i> Pausar
+              </button>
+              <button id="btn-reset-counters" class="btn btn-outline">
+                <i data-lucide="rotate-ccw"></i> Zerar Treino
+              </button>
+            </div>
 
-      <!-- RIGHT PANEL: Patient Interaction Frontend & Biomechanical Dashboard -->
-      <section class="dashboard-panel">
-        
-        <!-- Live Patient Feedback Banner -->
-        <div class="patient-feedback-card status-good" id="patient-feedback-card">
-          <div class="feedback-icon" id="feedback-icon-container">
-            <i data-lucide="check-circle-2"></i>
+            <div class="filter-toggle">
+              <label class="toggle-switch">
+                <input type="checkbox" id="chk-noise-filter" checked>
+                <span class="slider"></span>
+              </label>
+              <span>Filtro de Ruído Espacial</span>
+            </div>
           </div>
-          <div class="feedback-content">
-            <span class="feedback-tag" id="feedback-tag">EXCELENTE POSTURA</span>
-            <h3 class="feedback-msg" id="feedback-main-msg">Mantenha a coluna neutra e inicie a descida.</h3>
-          </div>
-        </div>
+        </section>
 
-        <!-- Biomechanical Metrics Cards -->
-        <div class="metrics-grid">
+        <!-- RIGHT PANEL: Patient Interaction Frontend & Biomechanical Dashboard -->
+        <section class="dashboard-panel">
           
-          <!-- Metric 1: Knee Flexion -->
-          <div class="metric-card">
-            <div class="metric-header">
-              <span>Flexão dos Joelhos</span>
-              <i data-lucide="corner-down-right" class="icon-subtle"></i>
+          <!-- Live Patient Feedback Banner -->
+          <div class="patient-feedback-card status-good" id="patient-feedback-card">
+            <div class="feedback-icon" id="feedback-icon-container">
+              <i data-lucide="check-circle-2"></i>
             </div>
-            <div class="metric-body">
-              <div class="metric-value" id="val-knee-angle">175.0°</div>
-              <div class="metric-target">Alvo: 80.0° a 90.0°</div>
-            </div>
-            <div class="progress-bar-container">
-              <div class="progress-bar-fill" id="bar-knee-flexion" style="width: 10%;"></div>
+            <div class="feedback-content">
+              <span class="feedback-tag" id="feedback-tag">EXCELENTE POSTURA</span>
+              <h3 class="feedback-msg" id="feedback-main-msg">Mantenha a coluna neutra e inicie a descida.</h3>
             </div>
           </div>
 
-          <!-- Metric 2: Trunk Angle -->
-          <div class="metric-card">
-            <div class="metric-header">
-              <span>Inclinação Tronco</span>
-              <i data-lucide="user-check" class="icon-subtle"></i>
+          <!-- Biomechanical Metrics Cards -->
+          <div class="metrics-grid">
+            
+            <!-- Metric 1: Knee Flexion -->
+            <div class="metric-card">
+              <div class="metric-header">
+                <span>Flexão Articular</span>
+                <i data-lucide="corner-down-right" class="icon-subtle"></i>
+              </div>
+              <div class="metric-body">
+                <div class="metric-value" id="val-knee-angle">175.0°</div>
+                <div class="metric-target">Alvo: 80.0° a 90.0°</div>
+              </div>
+              <div class="progress-bar-container">
+                <div class="progress-bar-fill" id="bar-knee-flexion" style="width: 10%;"></div>
+              </div>
             </div>
-            <div class="metric-body">
-              <div class="metric-value" id="val-trunk-angle">12.5°</div>
-              <div class="metric-target">Limite Seguro: &lt; 45.0°</div>
+
+            <!-- Metric 2: Trunk Angle -->
+            <div class="metric-card">
+              <div class="metric-header">
+                <span>Inclinação Tronco</span>
+                <i data-lucide="user-check" class="icon-subtle"></i>
+              </div>
+              <div class="metric-body">
+                <div class="metric-value" id="val-trunk-angle">12.5°</div>
+                <div class="metric-target">Limite Seguro: &lt; 45.0°</div>
+              </div>
+              <div class="progress-bar-container">
+                <div class="progress-bar-fill warning" id="bar-trunk-angle" style="width: 25%;"></div>
+              </div>
             </div>
-            <div class="progress-bar-container">
-              <div class="progress-bar-fill warning" id="bar-trunk-angle" style="width: 25%;"></div>
+
+            <!-- Metric 3: Dynamic Valgus Risk -->
+            <div class="metric-card">
+              <div class="metric-header">
+                <span>Alinhamento Medial (Valgo)</span>
+                <i data-lucide="shield-alert" class="icon-subtle"></i>
+              </div>
+              <div class="metric-body">
+                <div class="metric-value status-ok" id="val-valgus-status">Normal</div>
+                <div class="metric-target" id="val-valgus-ratio">Desvio: 0.0 cm</div>
+              </div>
+              <div class="status-indicator-bar" id="indicator-valgus"></div>
+            </div>
+
+            <!-- Metric 4: Heel Ground Contact -->
+            <div class="metric-card">
+              <div class="metric-header">
+                <span>Contato dos Calcanhares</span>
+                <i data-lucide="footprints" class="icon-subtle"></i>
+              </div>
+              <div class="metric-body">
+                <div class="metric-value status-ok" id="val-heel-status">Apoiados</div>
+                <div class="metric-target" id="val-heel-elev">Elevação: 0.0 cm</div>
+              </div>
+              <div class="status-indicator-bar" id="indicator-heel"></div>
+            </div>
+
+          </div>
+
+          <!-- Repetition Scoreboard -->
+          <div class="scoreboard-card">
+            <div class="score-item">
+              <span class="score-num text-primary" id="rep-total">0</span>
+              <span class="score-label">Total Repetições</span>
+            </div>
+            <div class="score-divider"></div>
+            <div class="score-item">
+              <span class="score-num text-success" id="rep-correct">0</span>
+              <span class="score-label">Execuções Corretas</span>
+            </div>
+            <div class="score-divider"></div>
+            <div class="score-item">
+              <span class="score-num text-danger" id="rep-faults">0</span>
+              <span class="score-label">Compensações</span>
             </div>
           </div>
 
-          <!-- Metric 3: Dynamic Valgus Risk -->
-          <div class="metric-card">
-            <div class="metric-header">
-              <span>Alinhamento Medial (Valgo)</span>
-              <i data-lucide="shield-alert" class="icon-subtle"></i>
+          <!-- Real-Time JSON Telemetry Stream Drawer -->
+          <div class="telemetry-card">
+            <div class="telemetry-header">
+              <div class="telemetry-title">
+                <i data-lucide="code"></i>
+                <h3>Telemetria Clínica JSON (Stream Instantânea)</h3>
+              </div>
+              <div class="telemetry-actions">
+                <button id="btn-copy-json" class="btn-sm btn-outline" title="Copiar JSON do Frame">
+                  <i data-lucide="copy"></i> Copiar
+                </button>
+                <button id="btn-download-session" class="btn-sm btn-outline" title="Baixar Histórico de Dados">
+                  <i data-lucide="download"></i> Exportar
+                </button>
+              </div>
             </div>
-            <div class="metric-body">
-              <div class="metric-value status-ok" id="val-valgus-status">Normal</div>
-              <div class="metric-target" id="val-valgus-ratio">Desvio: 0.0 cm</div>
+
+            <!-- Real-Time Syntax Highlighted Code Viewer -->
+            <div class="json-code-box">
+              <pre><code id="json-stream-output">{\n  "status": "Aguardando início da captação..."\n}</code></pre>
             </div>
-            <div class="status-indicator-bar" id="indicator-valgus"></div>
           </div>
 
-          <!-- Metric 4: Heel Ground Contact -->
-          <div class="metric-card">
-            <div class="metric-header">
-              <span>Contato dos Calcanhares</span>
-              <i data-lucide="footprints" class="icon-subtle"></i>
+        </section>
+      </main>
+
+    </section>
+
+    <!-- ========================================================================= -->
+    <!-- MODAL: LAUDO CLÍNICO DE FISIOTERAPIA (MEDICAL REPORT)                     -->
+    <!-- ========================================================================= -->
+    <div id="modal-clinical-report" class="modal-overlay hidden">
+      <div class="report-modal-content">
+        <div class="report-paper" id="report-paper">
+          
+          <!-- Hospital Report Header -->
+          <div class="report-header">
+            <div class="report-logo">
+              <i data-lucide="activity"></i>
+              <div>
+                <h2>HOSPITAL UNIVERSITÁRIO</h2>
+                <p>Centro de Biomecânica Clínica & Reabilitação Funcional</p>
+              </div>
             </div>
-            <div class="metric-body">
-              <div class="metric-value status-ok" id="val-heel-status">Apoiados</div>
-              <div class="metric-target" id="val-heel-elev">Elevação: 0.0 cm</div>
+            <div class="report-badge-id">
+              <span>LAUDO TÉCNICO DE TELEMETRIA</span>
+              <strong id="rep-report-id">#BP-2026-084</strong>
             </div>
-            <div class="status-indicator-bar" id="indicator-heel"></div>
+          </div>
+
+          <hr class="report-divider">
+
+          <!-- Patient & Session Metadata Table -->
+          <div class="report-meta-grid">
+            <div>
+              <span class="r-label">Paciente:</span>
+              <strong class="r-value" id="rep-patient-name">Paciente #PAC-2026-084</strong>
+            </div>
+            <div>
+              <span class="r-label">Fisioterapeuta Responsável:</span>
+              <strong class="r-value" id="rep-therapist-name">Dra. Fisioterapeuta Clínica</strong>
+            </div>
+            <div>
+              <span class="r-label">Protocolo Realizado:</span>
+              <strong class="r-value" id="rep-protocol-name">Agachamento Terapêutico</strong>
+            </div>
+            <div>
+              <span class="r-label">Data e Hora da Avaliação:</span>
+              <strong class="r-value" id="rep-timestamp">--/--/---- --:--</strong>
+            </div>
+          </div>
+
+          <!-- Quantitative Results Table -->
+          <div class="report-section-title">
+            <i data-lucide="bar-chart-2"></i>
+            <h3>1. Dosimetria e Eficácia do Movimento</h3>
+          </div>
+
+          <table class="report-table">
+            <thead>
+              <tr>
+                <th>Métrica Avaliada</th>
+                <th>Valor Obtido</th>
+                <th>Parâmetro de Referência</th>
+                <th>Status Clínico</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Total de Repetições Executadas</td>
+                <td id="rep-t-total">0 reps</td>
+                <td>Conforme prescrição</td>
+                <td><span class="r-status-ok">Concluído</span></td>
+              </tr>
+              <tr>
+                <td>Repetições com Amplitude Adequada</td>
+                <td id="rep-t-correct">0 reps</td>
+                <td>&gt; 70% das repetições</td>
+                <td id="rep-t-correct-status"><span class="r-status-ok">Adequado</span></td>
+              </tr>
+              <tr>
+                <td>Repetições com Desvio / Compensação</td>
+                <td id="rep-t-faults">0 reps</td>
+                <td>&lt; 30% das repetições</td>
+                <td id="rep-t-faults-status"><span class="r-status-ok">Controlado</span></td>
+              </tr>
+              <tr>
+                <td>Taxa de Eficácia Biomecânica</td>
+                <td id="rep-t-score">100%</td>
+                <td>Meta &ge; 80%</td>
+                <td id="rep-t-score-status"><span class="r-status-ok">Excelente</span></td>
+              </tr>
+            </tbody>
+          </table>
+
+          <!-- Clinical Opinion / Automatical Biomechanical Feedback -->
+          <div class="report-section-title">
+            <i data-lucide="file-check"></i>
+            <h3>2. Parecer da Visão Computacional & IoT</h3>
+          </div>
+          <div class="report-clinical-text" id="rep-clinical-text">
+            O paciente executou a série mantendo estabilização articular adequada dentro dos parâmetros biomecânicos estabelecidos. Não foram registradas sobrecargas anormais na articulação alvo monitorada.
+          </div>
+
+          <!-- Signatures Section -->
+          <div class="report-signatures">
+            <div class="sig-box">
+              <div class="sig-line"></div>
+              <span id="rep-sig-therapist">Fisioterapeuta Responsável</span>
+              <small>CREFITO / Registro Profissional</small>
+            </div>
+            <div class="sig-box">
+              <div class="sig-line"></div>
+              <span>Validação Digital do Sistema</span>
+              <small>BioPhysio MedTech AI Engine v2.0</small>
+            </div>
           </div>
 
         </div>
 
-        <!-- Repetition Scoreboard -->
-        <div class="scoreboard-card">
-          <div class="score-item">
-            <span class="score-num text-primary" id="rep-total">0</span>
-            <span class="score-label">Total Reps</span>
-          </div>
-          <div class="score-divider"></div>
-          <div class="score-item">
-            <span class="score-num text-success" id="rep-correct">0</span>
-            <span class="score-label">Corretas (80°-90°)</span>
-          </div>
-          <div class="score-divider"></div>
-          <div class="score-item">
-            <span class="score-num text-danger" id="rep-faults">0</span>
-            <span class="score-label">Com Compensações</span>
-          </div>
+        <!-- Report Modal Action Buttons -->
+        <div class="report-modal-actions">
+          <button id="btn-print-report" class="btn btn-primary">
+            <i data-lucide="printer"></i>
+            <span>Imprimir / Salvar PDF</span>
+          </button>
+          <button id="btn-close-report" class="btn btn-secondary">
+            <i data-lucide="x"></i>
+            <span>Fechar Laudo</span>
+          </button>
         </div>
+      </div>
+    </div>
 
-        <!-- Real-Time JSON Telemetry Stream Drawer -->
-        <div class="telemetry-card">
-          <div class="telemetry-header">
-            <div class="telemetry-title">
-              <i data-lucide="code"></i>
-              <h3>Protocolo de Saída JSON (Stream Instantânea)</h3>
-            </div>
-            <div class="telemetry-actions">
-              <button id="btn-copy-json" class="btn-sm btn-outline" title="Copiar JSON do Frame">
-                <i data-lucide="copy"></i> Copiar
-              </button>
-              <button id="btn-download-session" class="btn-sm btn-outline" title="Baixar Histórico de Dados">
-                <i data-lucide="download"></i> Exportar
-              </button>
-            </div>
-          </div>
-
-          <!-- Real-Time Syntax Highlighted Code Viewer -->
-          <div class="json-code-box">
-            <pre><code id="json-stream-output">{\n  "status": "Aguardando início da captação..."\n}</code></pre>
-          </div>
-        </div>
-
-      </section>
-    </main>
-
-    <!-- Footer Footer Information -->
+    <!-- Footer Information -->
     <footer class="app-footer">
-      <p>BioPhysio AI System &copy; 2026 — Motor de Análise Fisioterapêutica e Biomecânica Portátil em Tempo Real</p>
+      <div class="footer-content">
+        <p>BioPhysio MedTech System &copy; 2026 — Plataforma Hospitalar de Análise Biomecânica & Reabilitação Motora</p>
+        <span class="footer-tag">Certificação Acadêmica Maker &bull; Compatível com Protocolo HL7/JSON</span>
+      </div>
     </footer>
 
   </div>
@@ -302,7 +753,9 @@
   <script src="app.js"></script>
   <script>
     // Initialize Lucide icons
-    lucide.createIcons();
+    if (window.lucide) {
+      lucide.createIcons();
+    }
   </script>
 </body>
 </html>
