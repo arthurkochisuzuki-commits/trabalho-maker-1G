@@ -42,8 +42,12 @@
           <span id="status-text">Motor Conectado (30 FPS)</span>
         </div>
 
-        <button id="btn-connect-arduino" class="btn btn-sm btn-outline" title="Conectar ao Arduino via Web Serial (IoT)">
-          <i data-lucide="cpu"></i> Conectar Arduino (IoT)
+        <button id="btn-connect-ble" class="btn btn-sm btn-primary" title="Parear Fita Sensora via Web Bluetooth (BLE)">
+          <i data-lucide="bluetooth"></i> Conectar Bluetooth (BLE)
+        </button>
+
+        <button id="btn-connect-arduino" class="btn btn-sm btn-outline" title="Conectar ao Arduino via Porta COM / HC-05 / USB (Web Serial)">
+          <i data-lucide="cpu"></i> Porta Serial / HC-05
         </button>
 
         <button id="btn-toggle-voice" class="btn-icon active" title="Ativar/Desativar Sintetizador de Voz">
@@ -65,13 +69,12 @@
 
           <div class="selector-group" style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
             <select id="exercise-select" class="select-input" style="font-weight: 600; border-color: var(--color-primary);">
+              <optgroup label="Membros Superiores">
+                <option value="biceps_curl" selected>💪 Rosca Direta de Bíceps</option>
+                <option value="shoulder_abduction">🦾 Abdução de Ombro (Elevação)</option>
+              </optgroup>
               <optgroup label="Membros Inferiores">
                 <option value="squat">🏋️ Agachamento Terapêutico</option>
-              </optgroup>
-              <optgroup label="Membros Superiores (Fase 2)">
-                <option value="shoulder_abduction">🦾 Abdução de Ombro (Elevação)</option>
-                <option value="biceps_curl">💪 Rosca Direta de Bíceps</option>
-                <option value="triceps_extension">💥 Extensão de Tríceps (Coice)</option>
               </optgroup>
             </select>
 
@@ -246,6 +249,35 @@
 
         </div>
 
+        <!-- Bluetooth Flex Sensor Live Card (Leanstar IoT) -->
+        <div class="metric-card" id="ble-sensor-card" style="border-color: rgba(6, 182, 212, 0.4);">
+          <div class="metric-header" style="flex-wrap: wrap; gap: 0.5rem;">
+            <span style="display: flex; align-items: center; gap: 0.4rem; color: var(--color-brand); font-weight: 600;">
+              <i data-lucide="bluetooth" class="icon-subtle" style="opacity: 1;"></i>
+              Fita Sensora de Ângulo (Bluetooth IoT)
+            </span>
+            <div style="display: flex; gap: 0.4rem;">
+              <button id="btn-calib-0" class="btn btn-sm btn-outline" title="Salva a tensão atual como 0° (Membro Esticado)">
+                Calibrar 0° (Reto)
+              </button>
+              <button id="btn-calib-90" class="btn btn-sm btn-outline" title="Salva a tensão atual como 90° (Membro Dobrado)">
+                Calibrar 90° (Dobrado)
+              </button>
+            </div>
+          </div>
+          <div class="metric-body" style="align-items: center; flex-wrap: wrap; gap: 1rem; margin-top: 0.25rem;">
+            <div>
+              <div class="metric-value" id="val-ble-angle" style="color: var(--color-brand);">--°</div>
+              <div class="metric-target" id="val-ble-status">Aguardando conexão Bluetooth...</div>
+            </div>
+            <div style="display: flex; gap: 1rem; font-size: 0.8rem; color: var(--text-secondary);">
+              <span>Tensão: <strong id="val-ble-voltage" style="color: var(--text-primary);">-- V</strong></span>
+              <span>Resistência: <strong id="val-ble-resistance" style="color: var(--text-primary);">-- Ω</strong></span>
+              <span>ADC: <strong id="val-ble-adc" style="color: var(--text-primary);">--</strong></span>
+            </div>
+          </div>
+        </div>
+
         <!-- Repetition Scoreboard -->
         <div class="scoreboard-card">
           <div class="score-item">
@@ -298,6 +330,7 @@
   </div>
 
   <!-- JavaScript Application Modules -->
+  <script src="leanstar_ble.js"></script>
   <script src="biomechanics.js"></script>
   <script src="app.js"></script>
   <script>

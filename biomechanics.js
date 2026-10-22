@@ -317,30 +317,61 @@ class ArduinoIoTBridge {
   constructor() {
     this.port = null;
     this.writer = null;
+    this.reader = null;
     this.connected = false;
     this.onStatusChange = null;
+    this.onDataReceived = null;
   }
 
-  async connect() {
+  async connect(baudRate = 115200) {
     if (!("serial" in navigator)) {
       throw new Error("Web Serial API não é suportada por este navegador. Use o Google Chrome ou Microsoft Edge.");
     }
 
     try {
       this.port = await navigator.serial.requestPort();
-      await this.port.open({ baudRate: 115200 });
+      await this.port.open({ baudRate });
       
       const textEncoder = new TextEncoderStream();
       textEncoder.readable.pipeTo(this.port.writable);
       this.writer = textEncoder.writable.getWriter();
 
       this.connected = true;
-      if (this.onStatusChange) this.onStatusChange(true, "Arduino Conectado (115200 Baud)");
+      if (this.onStatusChange) this.onStatusChange(true, `Arduino Conectado (${baudRate} Baud)`);
+      this.readLoop();
       return true;
     } catch (err) {
       this.connected = false;
       if (this.onStatusChange) this.onStatusChange(false, `Falha IoT: ${err.message}`);
       throw err;
+    }
+  }
+
+  async readLoop() {
+    if (!this.port || !this.port.readable) return;
+    const textDecoder = new TextDecoderStream();
+    this.port.readable.pipeTo(textDecoder.writable).catch(() => {});
+    this.reader = textDecoder.readable.getReader();
+    let buffer = "";
+
+    try {
+      while (this.connected) {
+        const { value, done } = await this.reader.read();
+        if (done) break;
+        if (value) {
+          buffer += value;
+          const lines = buffer.split(/\r?\n/);
+          buffer = lines.pop() || "";
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (trimmed && this.onDataReceived) {
+              this.onDataReceived(trimmed);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("Leitura serial encerrada:", e);
     }
   }
 
@@ -399,8 +430,8 @@ const ExerciseLibrary = {
       const leftHeel = landmarks[29];
       const rightHeel = landmarks[30];
 
-      const leftKneeAngle = BiomechanicalEngine.calculateAngle(leftHip, leftKnee, leftAnkle);
-      const rightKneeAngle = BiomechanicalEngine.calculateAngle(rightHip, rightKnee, rightAnkle);
+      const leftKneeAngle = BiomechanicalEngine.calculateAngle3D(leftHip, leftKnee, leftAnkle);
+      const rightKneeAngle = BiomechanicalEngine.calculateAngle3D(rightHip, rightKnee, rightAnkle);
       const mainAngle = (leftKneeAngle + rightKneeAngle) / 2;
 
       const leftTrunk = BiomechanicalEngine.calculateTrunkInclination(leftShoulder, leftHip);
@@ -557,8 +588,8 @@ const ExerciseLibrary = {
       const leftWrist = landmarks[15];
       const rightWrist = landmarks[16];
 
-      const leftElbowAngle = BiomechanicalEngine.calculateElbowFlexion(leftShoulder, leftElbow, leftWrist);
-      const rightElbowAngle = BiomechanicalEngine.calculateElbowFlexion(rightShoulder, rightElbow, rightWrist);
+      const leftElbowAngle = BiomechanicalEngine.calculateAngle3D(leftShoulder, leftElbow, leftWrist);
+      const rightElbowAngle = BiomechanicalEngine.calculateAngle3D(rightShoulder, rightElbow, rightWrist);
       const mainAngle = Math.min(leftElbowAngle, rightElbowAngle);
 
       const elbowDisplacement = Math.abs(leftElbow.x - leftShoulder.x);
@@ -603,71 +634,6 @@ const ExerciseLibrary = {
         feedback,
         rgb,
         faults: { cotoveloProjetado }
-      };
-    }
-  },
-
-  triceps_extension: {
-    id: "triceps_extension",
-    category: "Membros Superiores",
-    name: "Extensão de Tríceps (Coice)",
-    targetJointName: "Extensão Cotovelo",
-    unit: "deg",
-    targetRange: "165.0° a 180.0°",
-    evaluate: (landmarks, engineState) => {
-      const leftShoulder = landmarks[11];
-      const rightShoulder = landmarks[12];
-      const leftElbow = landmarks[13];
-      const rightElbow = landmarks[14];
-      const leftWrist = landmarks[15];
-      const rightWrist = landmarks[16];
-
-      const leftElbowAngle = BiomechanicalEngine.calculateElbowFlexion(leftShoulder, leftElbow, leftWrist);
-      const rightElbowAngle = BiomechanicalEngine.calculateElbowFlexion(rightShoulder, rightElbow, rightWrist);
-      const mainAngle = Math.max(leftElbowAngle, rightElbowAngle);
-
-      const armAngle = BiomechanicalEngine.calculateArmHorizontalAngle(leftShoulder, leftElbow);
-      const bracoQueda = armAngle > 30.0;
-
-      let phase = engineState.currentState;
-      let repCompleted = false;
-      let isCorrectRep = false;
-
-      if (phase === "standing" && mainAngle > 110.0) {
-        phase = "eccentric";
-        engineState.resetRepFaults();
-      } else if (phase === "eccentric" && mainAngle >= 165.0) {
-        phase = "bottom_hold";
-      } else if (phase === "bottom_hold" && mainAngle < 155.0) {
-        phase = "concentric";
-      } else if (phase === "concentric" && mainAngle <= 95.0) {
-        repCompleted = true;
-        isCorrectRep = !engineState.hasFaultInCurrentRep;
-        phase = "standing";
-      }
-
-      if (bracoQueda) engineState.hasFaultInCurrentRep = true;
-
-      let status = "EXCELENTE";
-      let feedback = "Extensão completa do tríceps! Excelente trava.";
-      let rgb = [0, 255, 0];
-
-      if (bracoQueda) {
-        status = "ATENÇÃO";
-        feedback = "⚠️ Mantenha o braço alinhado em paralelo ao solo. Não deixe o cotovelo cair.";
-        rgb = [255, 165, 0];
-      }
-
-      return {
-        mainAngle,
-        secondaryAngle: armAngle,
-        phase,
-        repCompleted,
-        isCorrectRep,
-        status,
-        feedback,
-        rgb,
-        faults: { bracoQueda }
       };
     }
   }

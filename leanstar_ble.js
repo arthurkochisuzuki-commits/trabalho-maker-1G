@@ -145,6 +145,10 @@ class LeanstarBLEManager {
       this.device = await navigator.bluetooth.requestDevice({
         filters: [
           { namePrefix: "BioPhysio" },
+          { namePrefix: "ESP" },
+          { namePrefix: "Arduino" },
+          { namePrefix: "HM" },
+          { namePrefix: "BT" },
           { services: [this.SERVICE_UUID] }
         ],
         optionalServices: [this.SERVICE_UUID]

@@ -3,9 +3,6 @@
  */
 
 document.addEventListener('DOMContentLoaded', () => {
-  // Inicialização do Motor Biomecânico Unificado
-  const analyzer = new TherapeuticExerciseAnalyzer("squat");
-  
   // Elementos do DOM - Captação & Canvas
   const videoElement = document.getElementById('input-video');
   const canvasElement = document.getElementById('output-canvas');
@@ -13,6 +10,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const sourceSelect = document.getElementById('input-source-select');
   const exerciseSelect = document.getElementById('exercise-select');
   const videoFileInput = document.getElementById('video-file-input');
+
+  // Inicialização do Motor Biomecânico Unificado
+  const analyzer = new TherapeuticExerciseAnalyzer(exerciseSelect ? exerciseSelect.value : "biceps_curl");
 
   // Elementos do DOM - IoT & Câmera
   const btnConnectArduino = document.getElementById('btn-connect-arduino');
@@ -325,62 +325,75 @@ document.addEventListener('DOMContentLoaded', () => {
    */
   function generateSyntheticLandmarks() {
     simTime += 0.035;
-    const exKey = exerciseSelect ? exerciseSelect.value : "squat";
+    const exKey = exerciseSelect ? exerciseSelect.value : "biceps_curl";
     const lms = new Array(33).fill(0).map(() => ({ x: 0.5, y: 0.5, z: 0, visibility: 0.99 }));
 
     if (exKey === "squat") {
-      // Cinemática Realista de Agachamento Terapêutico
-      const depth = (Math.sin(simTime) + 1) / 2; // 0 (em pé) a 1 (agachado a ~85-90°)
-      const isValgusCycle = Math.floor(simTime / (Math.PI * 2)) % 3 === 1;
+      // Cinemática Realista de Agachamento Terapêutico (100% reto e alinhado, sem joelhos para dentro)
+      const depth = (Math.sin(simTime) + 1) / 2; // 0 (em pé: 175°) a 1 (agachado: 85°)
 
-      // Ancoragem e Alturas Proporcionais Reais
-      const headBaseY = 0.16;
-      const shoulderBaseY = 0.28;
-      const hipBaseY = 0.52;
-      const kneeBaseY = 0.70;
+      // Ângulo articular 3D alvo dos joelhos (175° em extensão -> 85° no fundo do agachamento)
+      const targetKneeDeg = 175.0 - depth * 90.0;
+      const thetaRad = (targetKneeDeg * Math.PI) / 180.0;
+
+      // Inclinação tibial frontal suave (2° em pé -> 15° agachado)
+      const shinTiltRad = ((2.0 + depth * 13.0) * Math.PI) / 180.0;
+      const shankLen = 0.16;
+      const thighLen = 0.18;
+
       const ankleY = 0.86;
       const heelY = 0.88;
+      const ankleZ = 0.0;
 
-      // Deslocamento vertical sincronizado de toda a parte superior do corpo
-      const verticalDrop = depth * 0.18;
-      const headY = headBaseY + verticalDrop;
-      const shoulderY = shoulderBaseY + verticalDrop;
-      const hipY = hipBaseY + verticalDrop;
+      // Joelho alinhado verticalmente em X (0.39 e 0.61), sem colapso medial (valgo)
+      const kneeY = ankleY - shankLen * Math.cos(shinTiltRad);
+      const kneeZ = ankleZ - shankLen * Math.sin(shinTiltRad);
 
-      // Flexão de Joelhos (Deslocamento anterior/lateral)
-      const kneeY = kneeBaseY + depth * 0.06;
-      const kneeXOffset = isValgusCycle && depth > 0.4 ? 0.03 : 0.12; // Se valgo, joelhos colapsam para dentro
+      // Quadril calculado pela cinemática 3D para manter coluna ereta e ângulo exato
+      const thighAngleRad = thetaRad + shinTiltRad;
+      const hipY = kneeY + thighLen * Math.cos(thighAngleRad);
+      const hipZ = kneeZ + thighLen * Math.sin(thighAngleRad);
+
+      const shoulderY = hipY - 0.24;
+      const headY = shoulderY - 0.12;
 
       // Cabeça & Face (Landmarks 0 a 10)
-      lms[0] = { x: 0.50, y: headY, z: -0.05, visibility: 0.99 };         // Nariz
-      lms[2] = { x: 0.48, y: headY - 0.01, z: -0.05, visibility: 0.99 };  // Olho E
-      lms[5] = { x: 0.52, y: headY - 0.01, z: -0.05, visibility: 0.99 };  // Olho D
-      lms[7] = { x: 0.46, y: headY, z: 0, visibility: 0.99 };             // Orelha E
-      lms[8] = { x: 0.54, y: headY, z: 0, visibility: 0.99 };             // Orelha D
+      lms[0] = { x: 0.50, y: headY, z: hipZ - 0.02, visibility: 0.99 };         // Nariz
+      lms[2] = { x: 0.48, y: headY - 0.01, z: hipZ - 0.02, visibility: 0.99 };  // Olho E
+      lms[5] = { x: 0.52, y: headY - 0.01, z: hipZ - 0.02, visibility: 0.99 };  // Olho D
+      lms[7] = { x: 0.46, y: headY, z: hipZ, visibility: 0.99 };                // Orelha E
+      lms[8] = { x: 0.54, y: headY, z: hipZ, visibility: 0.99 };                // Orelha D
 
-      // Tronco e Ombros (Landmarks 11, 12, 23, 24)
-      lms[11] = { x: 0.38, y: shoulderY, z: 0, visibility: 0.99 };        // Ombro E
-      lms[12] = { x: 0.62, y: shoulderY, z: 0, visibility: 0.99 };        // Ombro D
-      lms[23] = { x: 0.40, y: hipY, z: 0, visibility: 0.99 };             // Quadril E
-      lms[24] = { x: 0.60, y: hipY, z: 0, visibility: 0.99 };             // Quadril D
+      // Tronco e Ombros retos (Landmarks 11, 12, 23, 24)
+      lms[11] = { x: 0.38, y: shoulderY, z: hipZ, visibility: 0.99 };           // Ombro E
+      lms[12] = { x: 0.62, y: shoulderY, z: hipZ, visibility: 0.99 };           // Ombro D
+      lms[23] = { x: 0.39, y: hipY, z: hipZ, visibility: 0.99 };                // Quadril E
+      lms[24] = { x: 0.61, y: hipY, z: hipZ, visibility: 0.99 };                // Quadril D
 
-      // Braços em Elevação Frontal de Equilíbrio
-      lms[13] = { x: 0.36, y: shoulderY + 0.10, z: -0.1, visibility: 0.99 }; // Cotovelo E
-      lms[14] = { x: 0.64, y: shoulderY + 0.10, z: -0.1, visibility: 0.99 }; // Cotovelo D
-      lms[15] = { x: 0.35, y: shoulderY + 0.18, z: -0.2, visibility: 0.99 }; // Pulso E
-      lms[16] = { x: 0.65, y: shoulderY + 0.18, z: -0.2, visibility: 0.99 }; // Pulso D
+      // Braços estabilizados à frente durante a descida
+      lms[13] = { x: 0.36, y: shoulderY + 0.11, z: hipZ - 0.08, visibility: 0.99 }; // Cotovelo E
+      lms[14] = { x: 0.64, y: shoulderY + 0.11, z: hipZ - 0.08, visibility: 0.99 }; // Cotovelo D
+      lms[15] = { x: 0.36, y: shoulderY + 0.19 - depth * 0.04, z: hipZ - 0.16, visibility: 0.99 }; // Pulso E
+      lms[16] = { x: 0.64, y: shoulderY + 0.19 - depth * 0.04, z: hipZ - 0.16, visibility: 0.99 }; // Pulso D
 
-      // Membros Inferiores (Landmarks 25 a 30)
-      lms[25] = { x: 0.50 - kneeXOffset, y: kneeY, z: -0.05, visibility: 0.99 }; // Joelho E
-      lms[26] = { x: 0.50 + kneeXOffset, y: kneeY, z: -0.05, visibility: 0.99 }; // Joelho D
-      lms[27] = { x: 0.38, y: ankleY, z: 0, visibility: 0.99 };                 // Tornozelo E
-      lms[28] = { x: 0.62, y: ankleY, z: 0, visibility: 0.99 };                 // Tornozelo D
-      lms[29] = { x: 0.38, y: heelY, z: 0.05, visibility: 0.99 };              // Calcanhar E
-      lms[30] = { x: 0.62, y: heelY, z: 0.05, visibility: 0.99 };              // Calcanhar D
+      // Membros Inferiores 100% alinhados (Quadril, Joelho e Tornozelo na mesma linha vertical X)
+      lms[25] = { x: 0.39, y: kneeY, z: kneeZ, visibility: 0.99 };              // Joelho E (Reto)
+      lms[26] = { x: 0.61, y: kneeY, z: kneeZ, visibility: 0.99 };              // Joelho D (Reto)
+      lms[27] = { x: 0.39, y: ankleY, z: ankleZ, visibility: 0.99 };            // Tornozelo E
+      lms[28] = { x: 0.61, y: ankleY, z: ankleZ, visibility: 0.99 };            // Tornozelo D
+      lms[29] = { x: 0.39, y: heelY, z: ankleZ + 0.03, visibility: 0.99 };      // Calcanhar E
+      lms[30] = { x: 0.61, y: heelY, z: ankleZ + 0.03, visibility: 0.99 };      // Calcanhar D
     } else if (exKey === "shoulder_abduction") {
-      // Abdução de Ombro (Elevação Lateral)
+      // Abdução de Ombro (Elevação Lateral com os braços levemente flexionados)
       const factor = (Math.sin(simTime) + 1) / 2;
-      const armAngle = factor * (Math.PI / 2); // 0 a 90°
+      // Eleva de ~10° (repouso ao lado do corpo) até 90° (linha dos ombros)
+      const minAngle = (10.0 * Math.PI) / 180.0;
+      const maxAngle = (90.0 * Math.PI) / 180.0;
+      const armAngle = minAngle + factor * (maxAngle - minAngle);
+
+      // Flexão suave e constante dos cotovelos (~22° de curvatura anatômica)
+      const elbowBendRad = (22.0 * Math.PI) / 180.0;
+      const forearmAngle = armAngle - elbowBendRad;
 
       const shoulderY = 0.28;
       const hipY = 0.52;
@@ -390,22 +403,46 @@ document.addEventListener('DOMContentLoaded', () => {
       lms[0] = { x: 0.50, y: 0.16, z: 0, visibility: 0.99 };
       lms[11] = { x: 0.38, y: shoulderY, z: 0, visibility: 0.99 };
       lms[12] = { x: 0.62, y: shoulderY, z: 0, visibility: 0.99 };
-      lms[23] = { x: 0.41, y: hipY, z: 0, visibility: 0.99 };
-      lms[24] = { x: 0.59, y: hipY, z: 0, visibility: 0.99 };
-      lms[25] = { x: 0.41, y: kneeY, z: 0, visibility: 0.99 };
-      lms[26] = { x: 0.59, y: kneeY, z: 0, visibility: 0.99 };
-      lms[27] = { x: 0.41, y: ankleY, z: 0, visibility: 0.99 };
-      lms[28] = { x: 0.59, y: ankleY, z: 0, visibility: 0.99 };
+      lms[23] = { x: 0.40, y: hipY, z: 0, visibility: 0.99 };
+      lms[24] = { x: 0.60, y: hipY, z: 0, visibility: 0.99 };
+      lms[25] = { x: 0.40, y: kneeY, z: 0, visibility: 0.99 };
+      lms[26] = { x: 0.60, y: kneeY, z: 0, visibility: 0.99 };
+      lms[27] = { x: 0.40, y: ankleY, z: 0, visibility: 0.99 };
+      lms[28] = { x: 0.60, y: ankleY, z: 0, visibility: 0.99 };
+      lms[29] = { x: 0.40, y: 0.88, z: 0.02, visibility: 0.99 };
+      lms[30] = { x: 0.60, y: 0.88, z: 0.02, visibility: 0.99 };
 
-      const armLen1 = 0.16;
-      const armLen2 = 0.16;
-      lms[13] = { x: 0.38 - Math.sin(armAngle) * armLen1, y: shoulderY + Math.cos(armAngle) * armLen1, z: 0, visibility: 0.99 };
-      lms[14] = { x: 0.62 + Math.sin(armAngle) * armLen1, y: shoulderY + Math.cos(armAngle) * armLen1, z: 0, visibility: 0.99 };
-      lms[15] = { x: 0.38 - Math.sin(armAngle) * (armLen1 + armLen2), y: shoulderY + Math.cos(armAngle) * (armLen1 + armLen2), z: 0, visibility: 0.99 };
-      lms[16] = { x: 0.62 + Math.sin(armAngle) * (armLen1 + armLen2), y: shoulderY + Math.cos(armAngle) * (armLen1 + armLen2), z: 0, visibility: 0.99 };
+      const armLen1 = 0.15;
+      const armLen2 = 0.14;
+
+      // Cotovelos
+      const leftElbowX = 0.38 - Math.sin(armAngle) * armLen1;
+      const leftElbowY = shoulderY + Math.cos(armAngle) * armLen1;
+      const rightElbowX = 0.62 + Math.sin(armAngle) * armLen1;
+      const rightElbowY = shoulderY + Math.cos(armAngle) * armLen1;
+
+      lms[13] = { x: leftElbowX, y: leftElbowY, z: -0.02, visibility: 0.99 };
+      lms[14] = { x: rightElbowX, y: rightElbowY, z: -0.02, visibility: 0.99 };
+
+      // Antebraços levemente flexionados (punhos seguem com leve angulação em relação ao úmero)
+      lms[15] = {
+        x: leftElbowX - Math.sin(forearmAngle) * armLen2,
+        y: leftElbowY + Math.cos(forearmAngle) * armLen2,
+        z: -0.05,
+        visibility: 0.99
+      };
+      lms[16] = {
+        x: rightElbowX + Math.sin(forearmAngle) * armLen2,
+        y: rightElbowY + Math.cos(forearmAngle) * armLen2,
+        z: -0.05,
+        visibility: 0.99
+      };
     } else if (exKey === "biceps_curl") {
-      // Rosca Direta de Bíceps
+      // Rosca Direta de Bíceps com arco articular 3D realista (165° estendido a 40° contraído)
       const curlFactor = (Math.sin(simTime) + 1) / 2;
+      const elbowAngleDeg = 165.0 - curlFactor * 125.0;
+      const elbowAngleRad = (elbowAngleDeg * Math.PI) / 180.0;
+
       const shoulderY = 0.28;
       const hipY = 0.52;
       const kneeY = 0.70;
@@ -414,45 +451,27 @@ document.addEventListener('DOMContentLoaded', () => {
       lms[0] = { x: 0.50, y: 0.16, z: 0, visibility: 0.99 };
       lms[11] = { x: 0.38, y: shoulderY, z: 0, visibility: 0.99 };
       lms[12] = { x: 0.62, y: shoulderY, z: 0, visibility: 0.99 };
-      lms[23] = { x: 0.41, y: hipY, z: 0, visibility: 0.99 };
-      lms[24] = { x: 0.59, y: hipY, z: 0, visibility: 0.99 };
-      lms[25] = { x: 0.41, y: kneeY, z: 0, visibility: 0.99 };
-      lms[26] = { x: 0.59, y: kneeY, z: 0, visibility: 0.99 };
-      lms[27] = { x: 0.41, y: ankleY, z: 0, visibility: 0.99 };
-      lms[28] = { x: 0.59, y: ankleY, z: 0, visibility: 0.99 };
+      lms[23] = { x: 0.40, y: hipY, z: 0, visibility: 0.99 };
+      lms[24] = { x: 0.60, y: hipY, z: 0, visibility: 0.99 };
+      lms[25] = { x: 0.40, y: kneeY, z: 0, visibility: 0.99 };
+      lms[26] = { x: 0.60, y: kneeY, z: 0, visibility: 0.99 };
+      lms[27] = { x: 0.40, y: ankleY, z: 0, visibility: 0.99 };
+      lms[28] = { x: 0.60, y: ankleY, z: 0, visibility: 0.99 };
+      lms[29] = { x: 0.40, y: 0.88, z: 0.02, visibility: 0.99 };
+      lms[30] = { x: 0.60, y: 0.88, z: 0.02, visibility: 0.99 };
 
-      lms[13] = { x: 0.37, y: shoulderY + 0.16, z: 0, visibility: 0.99 }; // Cotovelo fixo
-      lms[14] = { x: 0.63, y: shoulderY + 0.16, z: 0, visibility: 0.99 };
+      const elbowY = shoulderY + 0.16;
+      lms[13] = { x: 0.37, y: elbowY, z: 0, visibility: 0.99 }; // Cotovelo E fixo ao lado do tronco
+      lms[14] = { x: 0.63, y: elbowY, z: 0, visibility: 0.99 }; // Cotovelo D fixo ao lado do tronco
 
-      const wristY = (shoulderY + 0.32) - curlFactor * 0.24;
-      const wristXOffset = curlFactor * 0.03;
-      lms[15] = { x: 0.37 + wristXOffset, y: wristY, z: -curlFactor * 0.1, visibility: 0.99 };
-      lms[16] = { x: 0.63 - wristXOffset, y: wristY, z: -curlFactor * 0.1, visibility: 0.99 };
-    } else if (exKey === "triceps_extension") {
-      // Extensão de Tríceps Coice
-      const extFactor = (Math.sin(simTime) + 1) / 2;
-      const shoulderY = 0.28;
-      const hipY = 0.52;
-      const kneeY = 0.70;
-      const ankleY = 0.86;
+      const forearmLen = 0.15;
+      // Arco circular 3D do antebraço (mantém comprimento real e ângulo 3D exato)
+      const wristY = elbowY - Math.cos(elbowAngleRad) * forearmLen;
+      const wristZ = -Math.sin(elbowAngleRad) * forearmLen;
+      const wristXOffset = Math.sin(elbowAngleRad) * 0.025;
 
-      lms[0] = { x: 0.50, y: 0.16, z: 0, visibility: 0.99 };
-      lms[11] = { x: 0.38, y: shoulderY, z: 0, visibility: 0.99 };
-      lms[12] = { x: 0.62, y: shoulderY, z: 0, visibility: 0.99 };
-      lms[23] = { x: 0.41, y: hipY, z: 0, visibility: 0.99 };
-      lms[24] = { x: 0.59, y: hipY, z: 0, visibility: 0.99 };
-      lms[25] = { x: 0.41, y: kneeY, z: 0, visibility: 0.99 };
-      lms[26] = { x: 0.59, y: kneeY, z: 0, visibility: 0.99 };
-      lms[27] = { x: 0.41, y: ankleY, z: 0, visibility: 0.99 };
-      lms[28] = { x: 0.59, y: ankleY, z: 0, visibility: 0.99 };
-
-      lms[13] = { x: 0.34, y: shoulderY + 0.10, z: 0, visibility: 0.99 };
-      lms[14] = { x: 0.66, y: shoulderY + 0.10, z: 0, visibility: 0.99 };
-
-      const wristX = 0.34 - extFactor * 0.18;
-      const wristY = (shoulderY + 0.24) - extFactor * 0.14;
-      lms[15] = { x: wristX, y: wristY, z: 0, visibility: 0.99 };
-      lms[16] = { x: 1 - wristX, y: wristY, z: 0, visibility: 0.99 };
+      lms[15] = { x: 0.37 + wristXOffset, y: wristY, z: wristZ, visibility: 0.99 };
+      lms[16] = { x: 0.63 - wristXOffset, y: wristY, z: wristZ, visibility: 0.99 };
     }
 
     return lms;
@@ -579,12 +598,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 6. RENDERIZAR MEDIDOR DE ÂNGULO E VETORES
     if (data && data.angulosAtuais) {
-      const exKey = data.exerciseKey || "squat";
+      const exKey = data.exerciseKey || "biceps_curl";
       if (exKey === "squat" && p25) {
         drawAngleBadge(canvasCtx, p25, `${Math.round(data.angulosAtuais.principalDeg)}°`, statusColor, "Flexão Joelho");
       } else if (exKey === "shoulder_abduction" && p11) {
         drawAngleBadge(canvasCtx, p11, `${Math.round(data.angulosAtuais.principalDeg)}°`, statusColor, "Abdução Ombro");
-      } else if ((exKey === "biceps_curl" || exKey === "triceps_extension") && p13) {
+      } else if (exKey === "biceps_curl" && p13) {
         drawAngleBadge(canvasCtx, p13, `${Math.round(data.angulosAtuais.principalDeg)}°`, statusColor, "Flexão Cotovelo");
       }
     }
@@ -793,6 +812,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const mainPct = Math.min(100, Math.max(0, (data.angulosAtuais.principalDeg / 180) * 100));
     barKneeFlexion.style.width = `${mainPct}%`;
 
+    const primaryHeaderSpan = valKneeAngle.closest('.metric-card')?.querySelector('.metric-header span');
+    const primaryTargetDiv = valKneeAngle.closest('.metric-card')?.querySelector('.metric-target');
+    if (primaryHeaderSpan && data.targetJointName) primaryHeaderSpan.textContent = data.targetJointName;
+    if (primaryTargetDiv && data.targetRange) primaryTargetDiv.textContent = `Alvo: ${data.targetRange}`;
+
     valTrunkAngle.textContent = `${data.angulosAtuais.secundarioDeg.toFixed(1)}°`;
     const secPct = Math.min(100, (data.angulosAtuais.secundarioDeg / 45) * 100);
     barTrunkAngle.style.width = `${secPct}%`;
@@ -854,17 +878,89 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // 2. Conexão Arduino (IoT) via Web Serial
+  // 2. Conexão Bluetooth (BLE) e Serial (HC-05 / USB) com Fita Sensora Leanstar
+  const btnConnectBle = document.getElementById('btn-connect-ble');
+  const btnCalib0 = document.getElementById('btn-calib-0');
+  const btnCalib90 = document.getElementById('btn-calib-90');
+  const valBleAngle = document.getElementById('val-ble-angle');
+  const valBleStatus = document.getElementById('val-ble-status');
+  const valBleVoltage = document.getElementById('val-ble-voltage');
+  const valBleResistance = document.getElementById('val-ble-resistance');
+  const valBleAdc = document.getElementById('val-ble-adc');
+
+  const leanstarConverter = window.LeanstarAngleConverter ? new window.LeanstarAngleConverter() : null;
+  const leanstarBle = window.LeanstarBLEManager
+    ? new window.LeanstarBLEManager(leanstarConverter, (sensorData) => {
+        if (valBleAngle) valBleAngle.textContent = `${sensorData.angleDeg.toFixed(1)}°`;
+        if (valBleVoltage) valBleVoltage.textContent = `${sensorData.voltage.toFixed(3)} V`;
+        if (valBleResistance) valBleResistance.textContent = `${sensorData.resistanceOhms} Ω`;
+        if (valBleAdc) valBleAdc.textContent = `${sensorData.rawAdc}`;
+        if (valBleStatus) valBleStatus.textContent = "🟢 Recebendo sinal em tempo real (50Hz)";
+      })
+    : null;
+
+  if (btnConnectBle && leanstarBle) {
+    btnConnectBle.addEventListener('click', async () => {
+      try {
+        if (valBleStatus) valBleStatus.textContent = "Buscando módulo Bluetooth...";
+        await leanstarBle.connect();
+        btnConnectBle.innerHTML = `<i data-lucide="bluetooth"></i> Bluetooth Conectado`;
+        if (valBleStatus) valBleStatus.textContent = `🟢 Conectado a ${leanstarBle.device?.name || 'BioPhysio-Leanstar'}`;
+        if (window.lucide) lucide.createIcons();
+      } catch (err) {
+        if (valBleStatus) valBleStatus.textContent = `⚠️ ${err.message}`;
+        alert(`Não foi possível conectar via Bluetooth BLE:\n${err.message}`);
+      }
+    });
+  }
+
+  if (btnCalib0 && leanstarConverter) {
+    btnCalib0.addEventListener('click', () => {
+      const v0 = leanstarConverter.calibrateZeroDegrees();
+      if (valBleStatus) valBleStatus.textContent = `✅ Calibrado 0° (Esticado) em ${v0.toFixed(3)} V`;
+    });
+  }
+
+  if (btnCalib90 && leanstarConverter) {
+    btnCalib90.addEventListener('click', () => {
+      const v90 = leanstarConverter.calibrateNinetyDegrees();
+      if (valBleStatus) valBleStatus.textContent = `✅ Calibrado 90° (Dobrado) em ${v90.toFixed(3)} V`;
+    });
+  }
+
   if (btnConnectArduino) {
+    analyzer.iotBridge.onDataReceived = (line) => {
+      // Extrai número de linhas como "[LEANSTAR] ADC Bruto: 2048 | Tensão: 1.650 V..." ou valores diretos "1.65" / "2048"
+      const voltMatch = line.match(/Tens[aã]o:\s*([\d.]+)/i);
+      const adcMatch = line.match(/ADC[^:]*:\s*(\d+)/i);
+      const resMatch = line.match(/Resist[eê]ncia:\s*([\d.]+)/i);
+
+      let rawAdc = adcMatch ? parseInt(adcMatch[1], 10) : parseFloat(line);
+      let voltage = voltMatch
+        ? parseFloat(voltMatch[1])
+        : (!isNaN(rawAdc) ? (rawAdc <= 5.0 ? rawAdc : (rawAdc * 3.3) / 4095.0) : NaN);
+
+      if (!isNaN(voltage) && leanstarConverter) {
+        const angleDeg = leanstarConverter.voltageToAngle(voltage);
+        const resistanceOhms = resMatch ? Math.round(parseFloat(resMatch[1])) : (voltage > 0.05 ? Math.round(47000.0 * ((3.3 / voltage) - 1.0)) : 0);
+        if (valBleAngle) valBleAngle.textContent = `${angleDeg.toFixed(1)}°`;
+        if (valBleVoltage) valBleVoltage.textContent = `${voltage.toFixed(3)} V`;
+        if (valBleResistance) valBleResistance.textContent = `${resistanceOhms} Ω`;
+        if (valBleAdc && !isNaN(rawAdc)) valBleAdc.textContent = `${Math.round(rawAdc)}`;
+        if (valBleStatus) valBleStatus.textContent = "🟢 Recebendo sinal via Porta Serial / HC-05";
+      }
+    };
+
     btnConnectArduino.addEventListener('click', async () => {
       try {
         await analyzer.iotBridge.connect();
         btnConnectArduino.classList.remove('btn-outline');
         btnConnectArduino.classList.add('btn-primary');
-        btnConnectArduino.innerHTML = `<i data-lucide="cpu"></i> Arduino Conectado`;
+        btnConnectArduino.innerHTML = `<i data-lucide="cpu"></i> Serial Conectado`;
+        if (valBleStatus) valBleStatus.textContent = "🟢 Porta Serial / HC-05 Conectada";
         if (window.lucide) lucide.createIcons();
       } catch (err) {
-        alert(`Não foi possível conectar ao Arduino: ${err.message}`);
+        alert(`Não foi possível conectar à porta Serial/HC-05: ${err.message}`);
       }
     });
   }
