@@ -878,17 +878,89 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // 2. Conexão Arduino (IoT) via Web Serial
+  // 2. Conexão Bluetooth (BLE) e Serial (HC-05 / USB) com Fita Sensora Leanstar
+  const btnConnectBle = document.getElementById('btn-connect-ble');
+  const btnCalib0 = document.getElementById('btn-calib-0');
+  const btnCalib90 = document.getElementById('btn-calib-90');
+  const valBleAngle = document.getElementById('val-ble-angle');
+  const valBleStatus = document.getElementById('val-ble-status');
+  const valBleVoltage = document.getElementById('val-ble-voltage');
+  const valBleResistance = document.getElementById('val-ble-resistance');
+  const valBleAdc = document.getElementById('val-ble-adc');
+
+  const leanstarConverter = window.LeanstarAngleConverter ? new window.LeanstarAngleConverter() : null;
+  const leanstarBle = window.LeanstarBLEManager
+    ? new window.LeanstarBLEManager(leanstarConverter, (sensorData) => {
+        if (valBleAngle) valBleAngle.textContent = `${sensorData.angleDeg.toFixed(1)}°`;
+        if (valBleVoltage) valBleVoltage.textContent = `${sensorData.voltage.toFixed(3)} V`;
+        if (valBleResistance) valBleResistance.textContent = `${sensorData.resistanceOhms} Ω`;
+        if (valBleAdc) valBleAdc.textContent = `${sensorData.rawAdc}`;
+        if (valBleStatus) valBleStatus.textContent = "🟢 Recebendo sinal em tempo real (50Hz)";
+      })
+    : null;
+
+  if (btnConnectBle && leanstarBle) {
+    btnConnectBle.addEventListener('click', async () => {
+      try {
+        if (valBleStatus) valBleStatus.textContent = "Buscando módulo Bluetooth...";
+        await leanstarBle.connect();
+        btnConnectBle.innerHTML = `<i data-lucide="bluetooth"></i> Bluetooth Conectado`;
+        if (valBleStatus) valBleStatus.textContent = `🟢 Conectado a ${leanstarBle.device?.name || 'BioPhysio-Leanstar'}`;
+        if (window.lucide) lucide.createIcons();
+      } catch (err) {
+        if (valBleStatus) valBleStatus.textContent = `⚠️ ${err.message}`;
+        alert(`Não foi possível conectar via Bluetooth BLE:\n${err.message}`);
+      }
+    });
+  }
+
+  if (btnCalib0 && leanstarConverter) {
+    btnCalib0.addEventListener('click', () => {
+      const v0 = leanstarConverter.calibrateZeroDegrees();
+      if (valBleStatus) valBleStatus.textContent = `✅ Calibrado 0° (Esticado) em ${v0.toFixed(3)} V`;
+    });
+  }
+
+  if (btnCalib90 && leanstarConverter) {
+    btnCalib90.addEventListener('click', () => {
+      const v90 = leanstarConverter.calibrateNinetyDegrees();
+      if (valBleStatus) valBleStatus.textContent = `✅ Calibrado 90° (Dobrado) em ${v90.toFixed(3)} V`;
+    });
+  }
+
   if (btnConnectArduino) {
+    analyzer.iotBridge.onDataReceived = (line) => {
+      // Extrai número de linhas como "[LEANSTAR] ADC Bruto: 2048 | Tensão: 1.650 V..." ou valores diretos "1.65" / "2048"
+      const voltMatch = line.match(/Tens[aã]o:\s*([\d.]+)/i);
+      const adcMatch = line.match(/ADC[^:]*:\s*(\d+)/i);
+      const resMatch = line.match(/Resist[eê]ncia:\s*([\d.]+)/i);
+
+      let rawAdc = adcMatch ? parseInt(adcMatch[1], 10) : parseFloat(line);
+      let voltage = voltMatch
+        ? parseFloat(voltMatch[1])
+        : (!isNaN(rawAdc) ? (rawAdc <= 5.0 ? rawAdc : (rawAdc * 3.3) / 4095.0) : NaN);
+
+      if (!isNaN(voltage) && leanstarConverter) {
+        const angleDeg = leanstarConverter.voltageToAngle(voltage);
+        const resistanceOhms = resMatch ? Math.round(parseFloat(resMatch[1])) : (voltage > 0.05 ? Math.round(47000.0 * ((3.3 / voltage) - 1.0)) : 0);
+        if (valBleAngle) valBleAngle.textContent = `${angleDeg.toFixed(1)}°`;
+        if (valBleVoltage) valBleVoltage.textContent = `${voltage.toFixed(3)} V`;
+        if (valBleResistance) valBleResistance.textContent = `${resistanceOhms} Ω`;
+        if (valBleAdc && !isNaN(rawAdc)) valBleAdc.textContent = `${Math.round(rawAdc)}`;
+        if (valBleStatus) valBleStatus.textContent = "🟢 Recebendo sinal via Porta Serial / HC-05";
+      }
+    };
+
     btnConnectArduino.addEventListener('click', async () => {
       try {
         await analyzer.iotBridge.connect();
         btnConnectArduino.classList.remove('btn-outline');
         btnConnectArduino.classList.add('btn-primary');
-        btnConnectArduino.innerHTML = `<i data-lucide="cpu"></i> Arduino Conectado`;
+        btnConnectArduino.innerHTML = `<i data-lucide="cpu"></i> Serial Conectado`;
+        if (valBleStatus) valBleStatus.textContent = "🟢 Porta Serial / HC-05 Conectada";
         if (window.lucide) lucide.createIcons();
       } catch (err) {
-        alert(`Não foi possível conectar ao Arduino: ${err.message}`);
+        alert(`Não foi possível conectar à porta Serial/HC-05: ${err.message}`);
       }
     });
   }

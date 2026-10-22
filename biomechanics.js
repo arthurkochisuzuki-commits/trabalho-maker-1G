@@ -317,30 +317,61 @@ class ArduinoIoTBridge {
   constructor() {
     this.port = null;
     this.writer = null;
+    this.reader = null;
     this.connected = false;
     this.onStatusChange = null;
+    this.onDataReceived = null;
   }
 
-  async connect() {
+  async connect(baudRate = 115200) {
     if (!("serial" in navigator)) {
       throw new Error("Web Serial API não é suportada por este navegador. Use o Google Chrome ou Microsoft Edge.");
     }
 
     try {
       this.port = await navigator.serial.requestPort();
-      await this.port.open({ baudRate: 115200 });
+      await this.port.open({ baudRate });
       
       const textEncoder = new TextEncoderStream();
       textEncoder.readable.pipeTo(this.port.writable);
       this.writer = textEncoder.writable.getWriter();
 
       this.connected = true;
-      if (this.onStatusChange) this.onStatusChange(true, "Arduino Conectado (115200 Baud)");
+      if (this.onStatusChange) this.onStatusChange(true, `Arduino Conectado (${baudRate} Baud)`);
+      this.readLoop();
       return true;
     } catch (err) {
       this.connected = false;
       if (this.onStatusChange) this.onStatusChange(false, `Falha IoT: ${err.message}`);
       throw err;
+    }
+  }
+
+  async readLoop() {
+    if (!this.port || !this.port.readable) return;
+    const textDecoder = new TextDecoderStream();
+    this.port.readable.pipeTo(textDecoder.writable).catch(() => {});
+    this.reader = textDecoder.readable.getReader();
+    let buffer = "";
+
+    try {
+      while (this.connected) {
+        const { value, done } = await this.reader.read();
+        if (done) break;
+        if (value) {
+          buffer += value;
+          const lines = buffer.split(/\r?\n/);
+          buffer = lines.pop() || "";
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (trimmed && this.onDataReceived) {
+              this.onDataReceived(trimmed);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("Leitura serial encerrada:", e);
     }
   }
 
